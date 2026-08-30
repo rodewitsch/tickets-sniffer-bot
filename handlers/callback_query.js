@@ -4,15 +4,6 @@ import { listWatchItems, removeWatchItem, deactivateWatchItem, miniAppUrl, miniA
 import { addWatchItem } from '../lib/watch.js';
 import { runCheck } from '../lib/checker.js';
 
-function unescapeHtml(s) {
-  return String(s || '')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&amp;/g, '&');
-}
-
 export default async function (cb) {
   const data = cb.data || '';
   const chatId = cb.message?.chat?.id || cb.from?.id;
@@ -61,15 +52,25 @@ export default async function (cb) {
   }
 
   if (data.startsWith('addq:')) {
-    const source = data.slice(5);
-    const query = unescapeHtml(cb.message?.text || '').trim();
+    // Формат: addq:<source>:<base64url(query)> — так исходное слово не теряется.
+    const parts = data.split(':');
+    const source = parts[1];
+    let query = '';
+    try {
+      query = Buffer.from(parts.slice(2).join(':'), 'base64url').toString('utf8').trim();
+    } catch { query = ''; }
     if (!query) return;
     const res = await addWatchItem({ chatId, kind: 'query', source, query });
     const text = res?.duplicate
       ? `«${query}» уже есть в списке отслеживания.`
       : `✅ Слежу за запросом «${query}» (${source === 'all' ? 'все источники' : source}). Проверю при следующем цикле — или нажмите /check.`;
     if (isEditable) {
-      await api.editMessageText({ chat_id: chatId, message_id: msgId, text });
+      try {
+        await api.editMessageText({ chat_id: chatId, message_id: msgId, text });
+      } catch (e) {
+        // Сообщение могло быть уже изменено/удалено — отправим как новое.
+        await api.sendMessage({ chat_id: chatId, text });
+      }
     } else {
       await api.sendMessage({ chat_id: chatId, text });
     }

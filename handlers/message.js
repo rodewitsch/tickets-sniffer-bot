@@ -98,11 +98,12 @@ export default async function (message) {
   }
 
   // Произвольный текст → предложение добавить как ключевое слово.
+  const kw = text.slice(0, 200);
   await api.sendMessage({
     chat_id: chatId,
-    text: proposeAddText(text.slice(0, 200)),
+    text: proposeAddText(kw),
     parse_mode: 'HTML',
-    reply_markup: proposeAddKeyboard(),
+    reply_markup: proposeAddKeyboard(kw),
   });
 
   // «Попутная» фоновая проверка (с внутренним интервалом, дешёвая в большинстве вызовов).
