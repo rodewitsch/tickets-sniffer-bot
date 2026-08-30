@@ -218,7 +218,10 @@
 <script>
 (function () {
   const tg = window.Telegram && window.Telegram.WebApp;
-  if (tg) { tg.ready(); tg.expand(); }
+  // Настоящий WebApp (открыт через чат бота): только тогда initDataUnsafe.user заполнен
+  // и sendData реально доставит данные. В браузере SDK загружается, но user отсутствует.
+  const isWebApp = !!(tg && tg.initDataUnsafe && tg.initDataUnsafe.user);
+  if (tg) { try { tg.ready(); if (isWebApp) tg.expand(); } catch (e) {} }
 
   const KIND = { query: 'ключевое слово', event: 'событие', venue: 'площадка' };
   const SRC = { all: 'все источники', afisha: 'Афиша', ticketpro: 'Ticketpro' };
@@ -245,10 +248,14 @@
     toast._t = setTimeout(function () { t.classList.remove('show'); }, 2200);
   }
   function haptic(kind) {
-    try { tg.HapticFeedback.impactOccurred(kind || 'light'); } catch (e) {}
+    try { if (isWebApp) tg.HapticFeedback.impactOccurred(kind || 'light'); } catch (e) {}
   }
   function send(payload) {
-    if (!tg) { console.log('sendData:', payload); toast('⚠️ Откройте через кнопку бота, а не по ссылке'); return false; }
+    if (!isWebApp) {
+      console.log('[sendData skipped, not WebApp]', payload);
+      toast('⚠️ Откройте через кнопку бота (Menu), а не по ссылке в браузере');
+      return false;
+    }
     try {
       tg.sendData(JSON.stringify(payload));
       return true;

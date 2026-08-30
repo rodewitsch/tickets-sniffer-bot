@@ -78,7 +78,8 @@ async function handleWebhook(req, res) {
   // Всегда отвечаем 200 до обработки, чтобы Telegram не ретраил; обработку
   // можно делать в фоне. Но по умолчанию выполняем синхронно и отвечаем после.
   const uwd = update.message && update.message.web_app_data;
-  console.log('[webhook] update', update.update_id, 'types:', Object.keys(update).filter(k => update[k] !== undefined && k !== 'update_id').join(','), 'chat:', update.message && update.message.chat && update.message.chat.id, 'web_app_data:', uwd ? 'YES len=' + (uwd.data || '').length : 'no');
+  const txt = update.message && update.message.text;
+  console.log('[webhook] update', update.update_id, 'types:', Object.keys(update).filter(k => update[k] !== undefined && k !== 'update_id').join(','), 'chat:', update.message && update.message.chat && update.message.chat.id, 'web_app_data:', uwd ? 'YES len=' + (uwd.data || '').length : 'no', txt ? ('text: ' + String(txt).slice(0,80)) : '');
   try {
     await dispatchUpdate(update);
     sendJson(res, 200, { ok: true });
