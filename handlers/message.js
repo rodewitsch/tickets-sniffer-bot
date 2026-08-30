@@ -17,6 +17,7 @@ export default async function (message) {
 
   // Данные из Mini App приходят как поле Message.web_app_data.
   if (message.web_app_data && message.web_app_data.data) {
+    console.log('[webapp] got web_app_data from chat', chatId, 'button:', message.web_app_data.button_text, 'len:', message.web_app_data.data.length);
     await handleWebAppData(chatId, message.web_app_data.data);
     return;
   }
