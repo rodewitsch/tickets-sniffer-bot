@@ -218,10 +218,9 @@
 <script>
 (function () {
   const tg = window.Telegram && window.Telegram.WebApp;
-  // Живой WebApp-сеанс: у него есть подписанные данные initData (непустая строка).
-  // initDataUnsafe.user может быть заполнен и в неживом контексте (предпросмотр/браузер),
-  // поэтому опираемся именно на initData.
-  const isWebApp = !!(tg && tg.initData && tg.initDataUnsafe && tg.initDataUnsafe.user);
+  // Для Mini Apps, запущенных через KeyboardButton.web_app, initData пуст (так задумано
+  // Telegram), но tg.platform заполнен. Поэтому детектируем живой клиент по tg.platform.
+  const isWebApp = !!(tg && tg.platform && typeof tg.sendData === 'function');
   function webappDiag() {
     if (!tg) return 'нет WebApp API';
     return 'platform=' + (tg.platform || '?') +

@@ -4,7 +4,7 @@ import { users } from '../schema.js';
 import { sql } from '../db.js';
 import {
   WELCOME, HELP,
-  mainMenuKeyboard, proposeAddKeyboard, proposeAddText,
+  mainMenuKeyboard, mainReplyKeyboard, proposeAddKeyboard, proposeAddText,
   renderWatchlist, watchlistKeyboard,
 } from '../lib/menus.js';
 import { listWatchItems, miniAppUrl, miniAppConfigured } from '../lib/watch.js';
@@ -51,17 +51,17 @@ export default async function (message) {
       chat_id: chatId,
       text: WELCOME,
       parse_mode: 'HTML',
-      reply_markup: mainMenuKeyboard(miniAppUrl(items), miniAppConfigured()),
+      reply_markup: mainReplyKeyboard(miniAppUrl(items), miniAppConfigured()),
     });
     return;
   }
 
-  if (text === '/help') {
+  if (text === '/help' || text === 'ℹ️ Помощь') {
     await api.sendMessage({ chat_id: chatId, text: HELP, parse_mode: 'HTML' });
     return;
   }
 
-  if (text === '/list') {
+  if (text === '/list' || text === '📋 Мой список') {
     const items = await listWatchItems(chatId);
     await api.sendMessage({
       chat_id: chatId,
@@ -72,7 +72,7 @@ export default async function (message) {
     return;
   }
 
-  if (text === '/check') {
+  if (text === '/check' || text === '⚡ Проверить сейчас') {
     await api.sendMessage({ chat_id: chatId, text: '🔎 Проверяю источники билетов…' });
     try {
       const res = await runCheck({ force: true });
