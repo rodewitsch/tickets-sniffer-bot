@@ -218,9 +218,18 @@
 <script>
 (function () {
   const tg = window.Telegram && window.Telegram.WebApp;
-  // Настоящий WebApp (открыт через чат бота): только тогда initDataUnsafe.user заполнен
-  // и sendData реально доставит данные. В браузере SDK загружается, но user отсутствует.
-  const isWebApp = !!(tg && tg.initDataUnsafe && tg.initDataUnsafe.user);
+  // Живой WebApp-сеанс: у него есть подписанные данные initData (непустая строка).
+  // initDataUnsafe.user может быть заполнен и в неживом контексте (предпросмотр/браузер),
+  // поэтому опираемся именно на initData.
+  const isWebApp = !!(tg && tg.initData && tg.initDataUnsafe && tg.initDataUnsafe.user);
+  function webappDiag() {
+    if (!tg) return 'нет WebApp API';
+    return 'platform=' + (tg.platform || '?') +
+      ' ver=' + (tg.version || '?') +
+      ' initData=' + String(tg.initData || '').length + 'симв' +
+      ' user=' + (tg.initDataUnsafe && tg.initDataUnsafe.user ? 'да' : 'нет');
+  }
+  console.log('[webapp] diag:', webappDiag());
   if (tg) { try { tg.ready(); if (isWebApp) tg.expand(); } catch (e) {} }
 
   const KIND = { query: 'ключевое слово', event: 'событие', venue: 'площадка' };
@@ -252,12 +261,19 @@
   }
   function send(payload) {
     if (!isWebApp) {
-      console.log('[sendData skipped, not WebApp]', payload);
-      toast('⚠️ Откройте через кнопку бота (Menu), а не по ссылке в браузере');
+      console.log('[sendData skipped, not WebApp]', payload, webappDiag());
+      toast('⚠️ Не WebApp-сеанс: ' + webappDiag());
       return false;
     }
     try {
       tg.sendData(JSON.stringify(payload));
+      // Если через 800 мс приложение всё ещё открыто — sendData реально не сработал.
+      setTimeout(function () {
+        if (!document.hidden) {
+          console.log('[webapp] sendData did not close app;', webappDiag());
+          toast('⚠️ Отправка не прошла: ' + webappDiag());
+        }
+      }, 800);
       return true;
     } catch (e) {
       toast('Не удалось отправить данные боту');
