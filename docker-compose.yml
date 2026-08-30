@@ -1,0 +1,65 @@
+# Поднимает всё одной командой:  docker compose up -d
+# Сервисы:
+#   bot  — Node-вебхук (server.js), создаёт таблицы при старте
+#   cron — периодическая проверка билетов (cron.js)
+#   web  — Caddy: автоматический HTTPS (Let's Encrypt) + proxy на bot
+# Общий volume для SQLite (:data), чтобы БД жила между рестартами.
+#
+# Перед запуском: скопируйте .env.example в .env и заполните BOT_TOKEN и
+# TICKET_DOMAIN (ваш домен, напр. bot.example.com). Затем:
+#   docker compose up -d --build
+
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tickets-bot:latest
+    container_name: tickets-bot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DB_PATH: /data/bot.db
+      PORT: 8080
+    volumes:
+      - tickets-data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  cron:
+    image: tickets-bot:latest
+    container_name: tickets-bot-cron
+    restart: unless-stopped
+    depends_on:
+      - bot
+    env_file: .env
+    environment:
+      DB_PATH: /data/bot.db
+      CHECK_INTERVAL_MIN: ${CHECK_INTERVAL_MIN:-15}
+    volumes:
+      - tickets-data:/data
+    command: ["node", "cron.js"]
+
+  web:
+    image: caddy:2-alpine
+    container_name: tickets-bot-web
+    restart: unless-stopped
+    depends_on:
+      - bot
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - TICKET_DOMAIN=${TICKET_DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  tickets-data:
+  caddy-data:
+  caddy-config:

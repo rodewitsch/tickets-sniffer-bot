@@ -1,14 +1,29 @@
 {
   "name": "tickets-telegram-bot",
   "private": true,
-  "devDependencies": {
-    "@tgcloud/cli": "^0.1.2"
-  },
   "version": "0.1.0",
   "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "drizzle-orm": "^0.45.2"
+  },
   "scripts": {
-    "deploy": "tgcloud push",
-    "status": "tgcloud status",
-    "run": "tgcloud run"
+    "start": "node server.js",
+    "dev": "node server.js",
+    "check": "node check.js force",
+    "migrate": "node migrate.js",
+    "db:generate": "drizzle-kit generate",
+    "set-webhook": "node scripts/set-webhook.mjs",
+    "test": "node smoke.mjs",
+    "docker:up": "docker compose up -d --build",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f",
+    "docker:ps": "docker compose ps"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.10"
   }
 }

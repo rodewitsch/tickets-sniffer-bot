@@ -1,0 +1,6 @@
+# Caddy: автоматический HTTPS (Let's Encrypt) + reverse proxy на bot:8080.
+# Домен подставляется из переменной TICKET_DOMAIN в docker-compose (Caddyfile-шаблон).
+
+{$TICKET_DOMAIN:localhost} {
+	reverse_proxy bot:8080
+}

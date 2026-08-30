@@ -1,0 +1,9 @@
+node_modules
+.git
+.tgcloud
+data
+miniapp
+*.db
+*.db-shm
+*.db-wal
+.env

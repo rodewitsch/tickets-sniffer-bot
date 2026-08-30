@@ -1,0 +1,58 @@
+# Автодеплой на DigitalOcean Droplet (без git на сервере, вход по паролю).
+# Схема: собрать Docker-образ → docker save → scp tar → docker load → compose up.
+# Сервер остаётся чистым: только docker-compose.yml, Caddyfile, .env.
+#
+# Путь к проекту на сервере ЗАХАРДКОЖЕН (/opt/tickets-bot).
+# Требует секретов в Settings → Secrets and variables → Actions:
+#   DROPLET_HOST      — IP или домен droplet (209.38.249.69)
+#   DROPLET_USER      — пользователь SSH (root)
+#   DROPLET_PASSWORD  — пароль SSH для пользователя (логин по паролю)
+#
+# ВНИМАНИЕ: пароль передаётся через sshpass -e (SSHPASS env). Так пароль
+# с любыми символами (вкл. двоеточие) не ломает кавычки в shell.
+
+name: Deploy to Droplet
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install sshpass
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+
+      - name: Build image
+        run: docker build -t tickets-bot:latest .
+
+      - name: Save image to archive
+        run: docker save tickets-bot:latest | gzip > /tmp/tickets-bot.tar.gz
+
+      - name: Copy image to droplet
+        env:
+          SSHPASS: ${{ secrets.DROPLET_PASSWORD }}
+          DROPLET_HOST: ${{ secrets.DROPLET_HOST }}
+          DROPLET_USER: ${{ secrets.DROPLET_USER }}
+        run: |
+          sshpass -e scp -o StrictHostKeyChecking=no \
+            /tmp/tickets-bot.tar.gz "$DROPLET_USER@$DROPLET_HOST:/opt/tickets-bot/images/tickets-bot.tar.gz"
+
+      - name: Load image and restart on droplet
+        env:
+          SSHPASS: ${{ secrets.DROPLET_PASSWORD }}
+          DROPLET_HOST: ${{ secrets.DROPLET_HOST }}
+          DROPLET_USER: ${{ secrets.DROPLET_USER }}
+        run: |
+          sshpass -e ssh -o StrictHostKeyChecking=no "$DROPLET_USER@$DROPLET_HOST" '
+            set -e
+            cd /opt/tickets-bot || exit 1
+            docker load -i images/tickets-bot.tar.gz
+            rm -f images/tickets-bot.tar.gz
+            docker compose up -d
+          '
