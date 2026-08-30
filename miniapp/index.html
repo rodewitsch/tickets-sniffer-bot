@@ -248,11 +248,13 @@
     try { tg.HapticFeedback.impactOccurred(kind || 'light'); } catch (e) {}
   }
   function send(payload) {
-    if (!tg) { console.log('sendData:', payload); toast('Демо-режим: данные не отправлены'); return; }
+    if (!tg) { console.log('sendData:', payload); toast('⚠️ Откройте через кнопку бота, а не по ссылке'); return false; }
     try {
       tg.sendData(JSON.stringify(payload));
+      return true;
     } catch (e) {
       toast('Не удалось отправить данные боту');
+      return false;
     }
   }
 
@@ -366,18 +368,20 @@
     if (evBtn) {
       const title = evBtn.dataset.title;
       if (evBtn.classList.contains('done')) return;
-      send({ a: 'add', k: 'event', s: 'afisha', q: title, u: evBtn.dataset.url, t: title });
+      const ok = send({ a: 'add', k: 'event', s: 'afisha', q: title, u: evBtn.dataset.url, t: title });
       evBtn.classList.add('done'); evBtn.textContent = '✓ Слежу';
-      haptic('medium'); toast('Добавлено! Бот подтвердит в чате');
+      haptic('medium');
+      if (ok) toast('Добавлено! Бот подтвердит в чате');
       return;
     }
     const vBtn = e.target.closest('[data-add-venue]');
     if (vBtn) {
       const title = vBtn.dataset.title;
       if (vBtn.classList.contains('done')) return;
-      send({ a: 'add', k: 'venue', s: 'afisha', q: title, u: vBtn.dataset.url, t: title });
+      const ok = send({ a: 'add', k: 'venue', s: 'afisha', q: title, u: vBtn.dataset.url, t: title });
       vBtn.classList.add('done'); vBtn.textContent = '✓ Слежу';
-      haptic('medium'); toast('Добавлено! Бот подтвердит в чате');
+      haptic('medium');
+      if (ok) toast('Добавлено! Бот подтвердит в чате');
     }
   });
 
@@ -395,8 +399,9 @@
     const kw = ($('kw-input').value || $('q').value).trim();
     if (!kw) { toast('Введите ключевое слово'); return; }
     const src = source === 'ticketpro' ? 'ticketpro' : 'all';
-    send({ a: 'add', k: 'query', s: src, q: kw });
-    haptic('medium'); toast('Слежу за «' + kw + '». Бот подтвердит в чате');
+    const ok = send({ a: 'add', k: 'query', s: src, q: kw });
+    haptic('medium');
+    if (ok) toast('Слежу за «' + kw + '». Бот подтвердит в чате');
   };
 
   // удаление из списка
@@ -407,13 +412,15 @@
     watchlist = watchlist.filter(function (i) { return i.i !== id; });
     renderWatchlist();
     send({ a: 'del', id: id });
-    haptic('light'); toast('Удалено');
+    haptic('light');
+    toast('Удалено');
   });
 
   // проверить сейчас
   $('check-now').onclick = function () {
-    send({ a: 'chk' });
-    haptic('medium'); toast('Запрос отправлен — бот проверит источники');
+    const ok = send({ a: 'chk' });
+    haptic('medium');
+    if (ok) toast('Запрос отправлен — бот проверит источники');
   };
 
   // ---------- старт ----------
