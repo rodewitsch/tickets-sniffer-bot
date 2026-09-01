@@ -62,7 +62,7 @@ export default async function (cb) {
     const res = await addWatchItem({ chatId, kind: 'query', source, query });
     const text = res?.duplicate
       ? `«${query}» уже есть в списке отслеживания.`
-      : `✅ Слежу за запросом «${query}» (${source === 'all' ? 'все источники' : source}). Проверю при следующем цикле.`;
+      : `✅ Слежу за запросом «${query}» (${source === 'all' ? 'все источники' : source}).`;
     if (isEditable) {
       try {
         await api.editMessageText({ chat_id: chatId, message_id: msgId, text });

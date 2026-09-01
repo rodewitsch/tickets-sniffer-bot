@@ -82,6 +82,23 @@ export const notifications = sqliteTable(
   ],
 );
 
+// Журнал циклов проверки (для ежедневной статистики): одна строка на выполненный
+// цикл. checked/notified/failed — счётчики позиций, уведомлений и ошибок цикла.
+export const checkLog = sqliteTable(
+  'check_log',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    startedAt: integer('started_at').default(sql`(unixepoch())`),
+    checked: integer('checked').notNull().default(0),
+    notified: integer('notified').notNull().default(0),
+    failed: integer('failed').notNull().default(0),
+    durationMs: integer('duration_ms').default(0),
+  },
+  (t) => [
+    index('idx_check_log_started').on(t.startedAt),
+  ],
+);
+
 // Служебные ключ/значение (время последней проверки и т.п.).
 export const meta = sqliteTable('meta', {
   key: text('key').primaryKey(),

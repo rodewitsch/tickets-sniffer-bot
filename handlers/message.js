@@ -9,6 +9,8 @@ import {
 } from '../lib/menus.js';
 import { listWatchItems, miniAppUrl, miniAppConfigured } from '../lib/watch.js';
 import { handleWebAppData } from '../lib/webapp.js';
+import { sendStatsReport } from '../lib/stats.js';
+import { STATS_CHAT_ID } from '../lib/config.js';
 
 export default async function (message) {
   const chat = message.chat;
@@ -71,10 +73,24 @@ export default async function (message) {
     return;
   }
 
+  if (text === '/stats') {
+    if (chatId !== STATS_CHAT_ID) {
+      await api.sendMessage({ chat_id: chatId, text: 'Команда доступна только владельцу.' });
+      return;
+    }
+    try {
+      await sendStatsReport(chatId);
+    } catch (e) {
+      console.error('stats report failed:', e && e.message || e);
+      await api.sendMessage({ chat_id: chatId, text: '⚠️ Не удалось собрать статистику, попробуйте позже.' });
+    }
+    return;
+  }
+
   if (text.startsWith('/')) {
     await api.sendMessage({
       chat_id: chatId,
-      text: 'Не знаю такую команду. Доступны: /start, /list, /help',
+      text: 'Не знаю такую команду. Доступны: /start, /list, /stats, /help',
     });
     return;
   }
