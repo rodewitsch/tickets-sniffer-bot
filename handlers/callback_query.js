@@ -2,7 +2,6 @@ import { api } from '../api.js';
 import { HELP, renderWatchlist, watchlistKeyboard, mainMenuKeyboard } from '../lib/menus.js';
 import { listWatchItems, removeWatchItem, deactivateWatchItem, miniAppUrl, miniAppConfigured } from '../lib/watch.js';
 import { addWatchItem } from '../lib/watch.js';
-import { runCheck } from '../lib/checker.js';
 
 export default async function (cb) {
   const data = cb.data || '';
@@ -63,7 +62,7 @@ export default async function (cb) {
     const res = await addWatchItem({ chatId, kind: 'query', source, query });
     const text = res?.duplicate
       ? `«${query}» уже есть в списке отслеживания.`
-      : `✅ Слежу за запросом «${query}» (${source === 'all' ? 'все источники' : source}). Проверю при следующем цикле — или нажмите /check.`;
+      : `✅ Слежу за запросом «${query}» (${source === 'all' ? 'все источники' : source}). Проверю при следующем цикле.`;
     if (isEditable) {
       try {
         await api.editMessageText({ chat_id: chatId, message_id: msgId, text });
@@ -73,22 +72,6 @@ export default async function (cb) {
       }
     } else {
       await api.sendMessage({ chat_id: chatId, text });
-    }
-    return;
-  }
-
-  if (data === 'chk:now') {
-    try {
-      const res = await runCheck({ force: true });
-      await api.sendMessage({
-        chat_id: chatId,
-        text: res.notified > 0
-          ? `✅ Готово: ${res.notified} новое(ых) уведомление(й)!`
-          : '✅ Готово: новых билетов не появилось.',
-      });
-    } catch (e) {
-      console.error('forced check failed', e);
-      await api.sendMessage({ chat_id: chatId, text: '⚠️ Проверка завершилась с ошибкой, попробуйте позже.' });
     }
     return;
   }

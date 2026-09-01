@@ -38,7 +38,7 @@ services:
     env_file: .env
     environment:
       DB_PATH: /data/bot.db
-      CHECK_INTERVAL_MIN: ${CHECK_INTERVAL_MIN:-15}
+      TZ: Europe/Minsk
     volumes:
       - tickets-data:/data
     command: ["node", "cron.js"]

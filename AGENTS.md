@@ -28,7 +28,7 @@ Compose (`bot`, `cron`, `web`/Caddy).
 | `server.js` | HTTP server: `POST /webhook`, `GET /check`, `GET /health`. Entrypoint. |
 | `migrate.js` | Applies `drizzle/` migrations. Runs at server startup and via `npm run migrate`. |
 | `check.js` | One-shot check cycle (CLI). |
-| `cron.js` | Loop that runs the check every `CHECK_INTERVAL_MIN` min (docker `cron` service). |
+| `cron.js` | Loop that runs the check on a randomized schedule: 15–30 min during 9:00–21:00, 60–120 min at night (docker `cron` service, TZ=Europe/Minsk). |
 | `scripts/set-webhook.mjs` | Sets the Telegram webhook URL. |
 | `Dockerfile`, `docker-compose.yml`, `Caddyfile` | Containerization + HTTPS reverse proxy. |
 | `miniapp/` | Static Telegram Mini App (hosted on GitHub Pages, not served by the bot). |

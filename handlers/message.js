@@ -9,7 +9,6 @@ import {
 } from '../lib/menus.js';
 import { listWatchItems, miniAppUrl, miniAppConfigured } from '../lib/watch.js';
 import { handleWebAppData } from '../lib/webapp.js';
-import { runCheck } from '../lib/checker.js';
 
 export default async function (message) {
   const chat = message.chat;
@@ -72,26 +71,10 @@ export default async function (message) {
     return;
   }
 
-  if (text === '/check' || text === '⚡ Проверить сейчас') {
-    try {
-      const res = await runCheck({ force: true });
-      await api.sendMessage({
-        chat_id: chatId,
-        text: res.notified > 0
-          ? `✅ Проверка завершена: ${res.notified} новое(ых) уведомление(й)!`
-          : '✅ Проверка завершена: новых билетов не появилось.',
-      });
-    } catch (e) {
-      console.error('forced check failed', e);
-      await api.sendMessage({ chat_id: chatId, text: '⚠️ Проверка завершилась с ошибкой, попробуйте позже.' });
-    }
-    return;
-  }
-
   if (text.startsWith('/')) {
     await api.sendMessage({
       chat_id: chatId,
-      text: 'Не знаю такую команду. Доступны: /start, /list, /check, /help',
+      text: 'Не знаю такую команду. Доступны: /start, /list, /help',
     });
     return;
   }
@@ -104,11 +87,4 @@ export default async function (message) {
     parse_mode: 'HTML',
     reply_markup: proposeAddKeyboard(kw),
   });
-
-  // «Попутная» фоновая проверка (с внутренним интервалом, дешёвая в большинстве вызовов).
-  try {
-    await runCheck({});
-  } catch (e) {
-    console.warn('piggyback check failed:', e.message);
-  }
 }
