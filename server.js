@@ -77,18 +77,24 @@ async function handleWebhook(req, res) {
     return sendJson(res, 400, { ok: false, error: 'Invalid JSON' });
   }
 
-  // Всегда отвечаем 200 до обработки, чтобы Telegram не ретраил; обработку
-  // можно делать в фоне. Но по умолчанию выполняем синхронно и отвечаем после.
   const uwd = update.message && update.message.web_app_data;
   const txt = update.message && update.message.text;
   console.log('[webhook] update', update.update_id, 'types:', Object.keys(update).filter(k => update[k] !== undefined && k !== 'update_id').join(','), 'chat:', update.message && update.message.chat && update.message.chat.id, 'web_app_data:', uwd ? 'YES len=' + (uwd.data || '').length : 'no', txt ? ('text: ' + String(txt).slice(0,80)) : '');
-  try {
-    await dispatchUpdate(update);
-    sendJson(res, 200, { ok: true });
-  } catch (err) {
-    console.error('webhook handler error:', err);
-    sendJson(res, 200, { ok: false, error: 'handler_error' });
-  }
+
+  // Отвечаем 200 Telegram СРАЗУ и обрабатываем апдейт в фоне. Если обработка
+  // (особенно /check) идёт долго, Telegram ждёт ответ вебхука и при таймауте
+  // «Read timeout expired» перестаёт слать апдейты (копит pending_update_count).
+  // Фоновый канал-очередь выполняет апдейты строго по одному, чтобы не было гонок.
+  enqueueUpdate(update);
+  sendJson(res, 200, { ok: true });
+}
+
+// Очередь обработки апдейтов: строго последовательно, в фоне, не блокируя вебхук.
+let updateQueue = Promise.resolve();
+function enqueueUpdate(update) {
+  updateQueue = updateQueue
+    .then(() => dispatchUpdate(update))
+    .catch((err) => console.error('webhook handler error:', err && err.message || err));
 }
 
 async function handleCheck(req, res, url) {
