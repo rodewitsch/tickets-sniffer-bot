@@ -78,7 +78,6 @@ export default async function (cb) {
   }
 
   if (data === 'chk:now') {
-    await api.sendMessage({ chat_id: chatId, text: '🔎 Проверяю источники билетов…' });
     try {
       const res = await runCheck({ force: true });
       await api.sendMessage({

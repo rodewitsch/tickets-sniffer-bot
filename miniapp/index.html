@@ -138,6 +138,41 @@
   }
   .toast.show { opacity: .96; }
 
+  /* Модалка выбора города */
+  .modal-overlay {
+    position: fixed; inset: 0; z-index: 60;
+    background: rgba(0,0,0,.45);
+    display: flex; align-items: flex-end; justify-content: center;
+  }
+  .modal {
+    background: var(--bg);
+    width: 100%; max-width: 480px;
+    border-radius: 18px 18px 0 0;
+    padding: 16px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+    max-height: 70vh;
+    display: flex; flex-direction: column;
+  }
+  .modal h2 { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+  .modal .hint { color: var(--hint); font-size: 13px; margin-bottom: 12px; }
+  .modal .list { overflow-y: auto; }
+  .modal .city {
+    display: flex; align-items: center; justify-content: space-between;
+    width: 100%;
+    background: var(--bg2); border: none; cursor: pointer;
+    color: var(--text);
+    border-radius: 12px;
+    padding: 12px 14px; margin-bottom: 8px;
+    font-size: 14.5px; font-weight: 600;
+    text-align: left;
+  }
+  .modal .city .lbl { opacity: .7; font-weight: 500; font-size: 12.5px; }
+  .modal .cancel {
+    margin-top: 6px;
+    background: transparent; border: none; cursor: pointer;
+    color: var(--hint); font-size: 13.5px; font-weight: 600;
+    padding: 10px;
+  }
+
   footer.bar {
     position: fixed; bottom: 0; left: 0; right: 0;
     background: var(--bg);
@@ -215,6 +250,16 @@
 
 <div class="toast" id="toast"></div>
 
+<!-- Модалка выбора города -->
+<div class="modal-overlay hidden" id="city-modal">
+  <div class="modal">
+    <h2 id="city-title">Город</h2>
+    <div class="hint" id="city-hint"></div>
+    <div class="list" id="city-list"></div>
+    <button class="cancel" id="city-cancel">Отмена</button>
+  </div>
+</div>
+
 <script>
 (function () {
   const tg = window.Telegram && window.Telegram.WebApp;
@@ -236,10 +281,49 @@
   const AFISHA_API = 'https://api.24afisha.by/api/v2/search';
   const AFISHA_SITE = 'https://24afisha.by';
 
+  // Публичный домен бота для эндпоинта /api/event-cities (выбор городов события).
+  // Указывается через ?api=https://ваш-домен в URL Mini App (см. lib/config.js MINIAPP_URL).
+  // Если не задан — выбор городов события недоступен, событие добавляется без города.
+  function readBotApi() {
+    const m = location.search.match(/[?&]api=([^&]+)/) || location.hash.match(/[#&]api=([^&]+)/);
+    const v = m && m[1] ? decodeURIComponent(m[1]) : '';
+    return v.replace(/\/+$/, '');
+  }
+  const BOT_API = readBotApi();
+
+  // Статический список городов для ключевых слов и площадок (slug → метка).
+  // Для событий список берётся динамически с бота.
+  const CITIES = [
+    { slug: '', label: 'Без города (по умолчанию)' },
+    { slug: 'minsk', label: 'Минск' },
+    { slug: 'brest', label: 'Брест' },
+    { slug: 'vitebsk', label: 'Витебск' },
+    { slug: 'gomel', label: 'Гомель' },
+    { slug: 'mogilev', label: 'Могилёв' },
+    { slug: 'grodno', label: 'Гродно' },
+    { slug: 'bobruisk', label: 'Бобруйск' },
+    { slug: 'baranovichi', label: 'Барановичи' },
+    { slug: 'novopolock', label: 'Новополоцк' },
+    { slug: 'borisov', label: 'Борисов' },
+    { slug: 'soligorsk', label: 'Солигорск' },
+    { slug: 'mozyry', label: 'Мозырь' },
+    { slug: 'pinsk', label: 'Пинск' },
+    { slug: 'lida', label: 'Лида' },
+    { slug: 'molodechno', label: 'Молодечно' },
+    { slug: 'orsha', label: 'Орша' },
+    { slug: 'kobrin', label: 'Кобрин' },
+    { slug: 'svetlogorsk', label: 'Светлогорск' },
+    { slug: 'rechica', label: 'Речица' },
+    { slug: 'slonim', label: 'Слоним' },
+    { slug: 'sluck', label: 'Слуцк' },
+  ];
+
   let source = 'afisha';
   let watchlist = [];
   let searchTimer = null;
   let currentQuery = '';
+  // Контекст ожидающего выбора города callback-а (как добавить позицию).
+  let pendingCityAdd = null;
 
   // ---------- утилиты ----------
   function $(id) { return document.getElementById(id); }
@@ -280,6 +364,50 @@
     }
   }
 
+  // ---------- модалка выбора города ----------
+  function openCityModal(title, hint, cities, onPick) {
+    pendingCityAdd = onPick;
+    $('city-title').textContent = title || 'Город';
+    $('city-hint').textContent = hint || '';
+    $('city-list').innerHTML = cities.map(function (c) {
+      return '<button class="city" data-city="' + esc(c.slug) + '">' +
+        '<span>' + esc(c.label) + '</span>' +
+        (c.count != null ? '<span class="lbl">' + esc(String(c.count)) + '</span>' : '') +
+      '</button>';
+    }).join('');
+    $('city-modal').classList.remove('hidden');
+  }
+  function closeCityModal() {
+    $('city-modal').classList.add('hidden');
+    pendingCityAdd = null;
+  }
+  $('city-cancel').onclick = closeCityModal;
+  $('city-modal').addEventListener('click', function (e) {
+    const btn = e.target.closest('[data-city]');
+    if (!btn) return;
+    const cb = pendingCityAdd;
+    closeCityModal();
+    if (cb) cb(btn.dataset.city === '' ? null : btn.dataset.city);
+  });
+
+  // Все города события: "все города" + конкретные города. Для событий список
+  // берём с бота (GET /api/event-cities). Если эндпоинт недоступен — null.
+  async function eventCities(url) {
+    if (!BOT_API) return null;
+    try {
+      const res = await fetch(BOT_API + '/api/event-cities?url=' + encodeURIComponent(url),
+        { headers: { Accept: 'application/json' } });
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (!data || !data.ok || !data.cities || !data.cities.length) return null;
+      const cities = [{ slug: 'all', label: 'Все города' }]
+        .concat(data.cities.map(function (c) { return { slug: c.slug, label: c.label }; }));
+      return cities;
+    } catch (e) {
+      return null;
+    }
+  }
+
   // ---------- снапшот списка из URL ----------
   function readWatchlist() {
     let raw = null;
@@ -294,14 +422,21 @@
     $('wl-count').textContent = watchlist.length ? '(' + watchlist.length + ')' : '';
     $('wl-empty').classList.toggle('hidden', watchlist.length > 0);
     $('wl-items').innerHTML = watchlist.map(function (i) {
+      const cityPart = i.c ? ' · ' + esc(cityLabelStatic(i.c)) : '';
       return '<div class="watch-item" data-id="' + i.i + '">' +
         '<div class="t">' +
           '<div class="name">' + esc(i.t) + '</div>' +
-          '<div class="meta">' + esc(KIND[i.k] || i.k) + ' · ' + esc(SRC[i.s] || i.s) + '</div>' +
+          '<div class="meta">' + esc(KIND[i.k] || i.k) + ' · ' + esc(SRC[i.s] || i.s) + cityPart + '</div>' +
         '</div>' +
         '<button class="btn del" data-del="' + i.i + '">❌</button>' +
       '</div>';
     }).join('');
+  }
+
+  function cityLabelStatic(slug) {
+    if (slug === 'all') return 'все города';
+    const found = CITIES.find(function (c) { return c.slug === slug; });
+    return found ? found.label : slug;
   }
 
   // ---------- вкладки ----------
@@ -389,21 +524,43 @@
     const evBtn = e.target.closest('[data-add-event]');
     if (evBtn) {
       const title = evBtn.dataset.title;
+      const url = evBtn.dataset.url;
       if (evBtn.classList.contains('done')) return;
-      const ok = send({ a: 'add', k: 'event', s: 'afisha', q: title, u: evBtn.dataset.url, t: title });
-      evBtn.classList.add('done'); evBtn.textContent = '✓ Слежу';
-      haptic('medium');
-      if (ok) toast('Добавлено! Бот подтвердит в чате');
+      evBtn.classList.add('done'); evBtn.textContent = '…';
+      // Пробуем получить города события; при удаче показываем пикер, иначе — просто добавляем.
+      eventCities(url).then(function (cities) {
+        if (cities) {
+          evBtn.textContent = 'Следить';
+          evBtn.classList.remove('done');
+          openCityModal('Выберите город', 'Где следить за билетами на «' + title + '»?', cities, function (city) {
+            const c = city == null ? 'all' : city;
+            const cityMeta = city == null ? ' (все города)' : (city === 'all' ? ' (все города)' : ' (' + cityLabelStatic(city) + ')');
+            send({ a: 'add', k: 'event', s: 'afisha', q: title, u: url, t: title + cityMeta, c: c });
+            haptic('medium');
+            toast('Добавлено! Бот подтвердит в чате');
+          });
+        } else {
+          evBtn.textContent = '✓ Слежу';
+          const ok = send({ a: 'add', k: 'event', s: 'afisha', q: title, u: url, t: title });
+          haptic('medium');
+          if (ok) toast('Добавлено! Бот подтвердит в чате');
+        }
+      });
       return;
     }
     const vBtn = e.target.closest('[data-add-venue]');
     if (vBtn) {
       const title = vBtn.dataset.title;
+      const url = vBtn.dataset.url;
       if (vBtn.classList.contains('done')) return;
-      const ok = send({ a: 'add', k: 'venue', s: 'afisha', q: title, u: vBtn.dataset.url, t: title });
-      vBtn.classList.add('done'); vBtn.textContent = '✓ Слежу';
-      haptic('medium');
-      if (ok) toast('Добавлено! Бот подтвердит в чате');
+      vBtn.classList.add('done'); vBtn.textContent = '…';
+      openCityModal('Город площадки', 'В каком городе следить за площадкой «' + title + '»?', CITIES.slice(0, 6), function (city) {
+        vBtn.textContent = '✓ Слежу';
+        const meta = city ? ' (' + cityLabelStatic(city) + ')' : '';
+        const ok = send({ a: 'add', k: 'venue', s: 'afisha', q: title, u: url, t: title + meta, c: city });
+        haptic('medium');
+        if (ok) toast('Добавлено! Бот подтвердит в чате');
+      });
     }
   });
 
@@ -421,9 +578,12 @@
     const kw = ($('kw-input').value || $('q').value).trim();
     if (!kw) { toast('Введите ключевое слово'); return; }
     const src = source === 'ticketpro' ? 'ticketpro' : 'all';
-    const ok = send({ a: 'add', k: 'query', s: src, q: kw });
-    haptic('medium');
-    if (ok) toast('Слежу за «' + kw + '». Бот подтвердит в чате');
+    openCityModal('Город для слова', 'В каком городе искать «' + kw + '»?', CITIES, function (city) {
+      const meta = city ? ' (' + cityLabelStatic(city) + ')' : '';
+      const ok = send({ a: 'add', k: 'query', s: src, q: kw, c: city });
+      haptic('medium');
+      if (ok) toast('Слежу за «' + kw + meta + '». Бот подтвердит в чате');
+    });
   };
 
   // удаление из списка

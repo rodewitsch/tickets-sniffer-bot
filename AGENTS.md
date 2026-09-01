@@ -44,6 +44,17 @@ Compose (`bot`, `cron`, `web`/Caddy).
 - `api` lives in `api.js` (separate from `db.js`). Import it from wherever you need
   to call Telegram.
 - **No foreign keys** in SQLite — enforce integrity in app code.
+- **Город у позиций слежения**: `watch_items.city` = slug (`brest`), `'all'` (все города)
+  или NULL (город из URL события). События 24afisha живут по одному URL на город
+  (`/ru/<город>/event/<slug>`), расписание/наличие в городах может различаться.
+- **Наличие по городу (afisha)** берётся из schedule API, а не из JSON-LD:
+  `GET api.24afisha.by/api/v2/schedule/events/<числовой-id события>?cityId=<N>` →
+  `data[0].objects[].sessions[].isSaleOpen`. Список городов: `GET /api/v2/cities` (slug→id).
+  Кино размечено JSON-LD как `Movie` (без offers/location) — JSON-LD там бесполезен.
+- **Afisha `events.uid` — city-aware**: `'<slug>@<city>'` (образует `afishaUidForCity`).
+  Одно событие кэшируется отдельно по городам.
+- **Сервер**: есть служебный эндпоинт `GET /api/event-cities?url=…` (CORS) для выбора
+  городов события в мини-приложении; хост URL валидируется (SSRF-защита).
 - Schema lives in `schema.js` (Drizzle `sqliteTable`). After editing schema run `npm run db:generate` (`drizzle-kit generate`), then `npm run migrate` to apply. `server.js` also applies migrations at startup.
 - `SERVE_STATIC` is off in Docker; `miniapp/` is published to GitHub Pages.
 

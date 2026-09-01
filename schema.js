@@ -15,6 +15,8 @@ export const users = sqliteTable('users', {
 //         event  — конкретное событие (проверяем его страницу напрямую)
 //         venue  — площадка (следим за всеми событиями площадки)
 // source: all | afisha | ticketpro
+// city:   город-слаг ('minsk' | 'brest' | …), 'all' — следить во всех городах,
+//         NULL — город не выбран (по умолчанию город события из его URL).
 export const watchItems = sqliteTable(
   'watch_items',
   {
@@ -25,6 +27,7 @@ export const watchItems = sqliteTable(
     query: text('query').notNull(),
     eventUrl: text('event_url'),
     title: text('title'),
+    city: text('city'),
     active: integer('active', { mode: 'boolean' }).default(true),
     createdAt: integer('created_at').default(sql`(unixepoch())`),
   },

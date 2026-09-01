@@ -13,6 +13,8 @@ import { fileURLToPath } from 'node:url';
 import { PORT, CHECK_SECRET } from './env.js';
 import { runCheck } from './lib/checker.js';
 import { runMigrations } from './migrate.js';
+import { fetchEventCities, AFISHA_HOSTS } from './lib/sources/afisha.js';
+import { cityLabel } from './lib/cities.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MINIAPP_DIR = path.join(__dirname, 'miniapp');
@@ -103,6 +105,51 @@ async function handleCheck(req, res, url) {
   }
 }
 
+// GET /api/event-cities?url=<eventUrl> — список городов события «афиши».
+// Используется мини-приложением (GitHub Pages) для выбора города слежения.
+// Валидируем хост URL (защита от SSRF) и отдаём заголовки CORS для браузера.
+function corsHeaders(req) {
+  const origin = req.headers.origin;
+  return {
+    'Access-Control-Allow-Origin': origin || '*',
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Vary': 'Origin',
+  };
+}
+
+async function handleEventCities(req, res, url) {
+  const target = url.searchParams.get('url') || '';
+  let parsed;
+  try {
+    parsed = new URL(target);
+  } catch {
+    return sendHeaders(res, corsHeaders(req), 400, { ok: false, error: 'bad_url' });
+  }
+  // Whitelist хостов: только 24afisha.by и bycard.by.
+  const host = parsed.hostname.toLowerCase();
+  if (!AFISHA_HOSTS.some((h) => host === h || host.endsWith('.' + h))) {
+    return sendHeaders(res, corsHeaders(req), 400, { ok: false, error: 'host_not_allowed' });
+  }
+  try {
+    const data = await fetchEventCities(parsed.toString());
+    if (!data) {
+      return sendHeaders(res, corsHeaders(req), 404, { ok: false, error: 'not_found' });
+    }
+    const current = { slug: data.current.slug, label: cityLabel(data.current.slug), url: data.current.url };
+    const cities = data.cities.map((c) => ({ slug: c.slug, label: cityLabel(c.slug), url: c.url }));
+    sendHeaders(res, corsHeaders(req), 200, { ok: true, current, cities });
+  } catch (err) {
+    console.error('event-cities error:', err && err.message || err);
+    sendHeaders(res, corsHeaders(req), 500, { ok: false, error: 'server_error' });
+  }
+}
+
+function sendHeaders(res, headers, status, obj) {
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', ...headers });
+  res.end(JSON.stringify(obj));
+}
+
 async function serveStatic(res, pathname) {
   let rel = pathname === '/' ? '/index.html' : pathname;
   const file = path.normalize(path.join(MINIAPP_DIR, rel));
@@ -135,6 +182,16 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === '/check' && req.method === 'GET') {
       return await handleCheck(req, res, url);
+    }
+    if (url.pathname === '/api/event-cities') {
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204, corsHeaders(req));
+        res.end();
+        return;
+      }
+      if (req.method === 'GET') {
+        return await handleEventCities(req, res, url);
+      }
     }
     if (url.pathname === '/health' && req.method === 'GET') {
       return sendJson(res, 200, { ok: true });

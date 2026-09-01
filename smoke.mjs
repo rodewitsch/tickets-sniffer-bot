@@ -43,10 +43,18 @@ async function main() {
   const [w2] = await db.insert(watchItems).values({ chatId: 1, kind: 'event', source: 'afisha', query: 'event' }).returning();
   const list = await db.select().from(watchItems).where(eq(watchItems.chatId, 1)).orderBy(desc(watchItems.createdAt)).all();
   assert.equal(list.length, 2, 'two watch items');
+
+  // city column: insert + read-back
+  const [w3] = await db.insert(watchItems).values({ chatId: 2, kind: 'event', source: 'afisha', query: 'nakrayu', city: 'brest' }).returning();
+  assert.equal(w3.city, 'brest', 'city read back');
+  const w3row = await db.select().from(watchItems).where(eq(watchItems.id, w3.id)).get();
+  assert.equal(w3row.city, 'brest', 'city persisted');
+
   await db.update(watchItems).set({ active: false }).where(eq(watchItems.id, w1.id)).run();
   const active = await db.select().from(watchItems).where(and(eq(watchItems.chatId, 1), eq(watchItems.active, true))).all();
   assert.equal(active.length, 1, 'deactivated one');
   await db.delete(watchItems).where(eq(watchItems.id, w2.id)).run();
+  await db.delete(watchItems).where(eq(watchItems.id, w3.id)).run();
   const afterDel = await db.select().from(watchItems).where(eq(watchItems.chatId, 1)).all();
   assert.equal(afterDel.length, 1, 'deleted one');
 
