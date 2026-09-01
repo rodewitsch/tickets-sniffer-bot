@@ -57,6 +57,10 @@ Compose (`bot`, `cron`, `web`/Caddy).
   городов события в мини-приложении; хост URL валидируется (SSRF-защита).
 - Schema lives in `schema.js` (Drizzle `sqliteTable`). After editing schema run `npm run db:generate` (`drizzle-kit generate`), then `npm run migrate` to apply. `server.js` also applies migrations at startup.
 - `SERVE_STATIC` is off in Docker; `miniapp/` is published to GitHub Pages.
+- **Commits**: always in **English** and following **Conventional Commits**
+  (`feat:`, `fix:`, `refactor:`, `chore:`, `docs:`, `test:`, `ci:`, etc.), e.g.
+  `fix: refresh mini app watch list after delete`. Never write commit messages in
+  Russian — project UI/docs are in Russian, but commit messages must be English.
 
 ## Run / deploy
 
