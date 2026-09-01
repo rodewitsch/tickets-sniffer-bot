@@ -210,28 +210,22 @@
 <main>
   <!-- ================= ПОИСК ================= -->
   <section id="view-search">
-    <div class="searchbar">
-      <input id="q" type="text" placeholder="Исполнитель, событие, площадка…" autocomplete="off">
-    </div>
-    <div class="chips">
+    <div class="chips" style="margin-top:0">
       <div class="chip active" data-src="afisha">Афиша / ByCard</div>
-      <div class="chip" data-src="ticketpro">Ticketpro — по ключевому слову</div>
+      <div class="chip" data-src="ticketpro">Ticketpro</div>
+      <div class="chip" data-src="all">Все источники — ключевое слово</div>
     </div>
 
-    <div id="tp-panel" class="hint-block hidden">
-      У Ticketpro нет открытого браузерного API, но бот умеет искать там по ключевому слову.
-      Введите запрос выше и нажмите «Добавить слово» — бот будет проверять и Ticketpro.
+    <div class="searchbar" style="margin-top:12px">
+      <input id="q" type="text" placeholder="Исполнитель, событие, площадка…" autocomplete="off">
+    </div>
+
+    <div id="keyword-actions" class="hidden" style="margin-top:12px">
+      <div id="keyword-hint" class="hint-block" style="padding:0 0 12px"></div>
+      <button class="btn" id="kw-add" style="width:100%">Следить за словом</button>
     </div>
 
     <div id="results"></div>
-
-    <div id="keyword-panel" class="hidden" style="margin-top:16px">
-      <div class="hint-block" style="padding:4px">Следить за ключевым словом во всех источниках:</div>
-      <div style="display:flex;gap:8px">
-        <input id="kw-input" type="text" placeholder="Ключевое слово" style="flex:1;background:var(--bg2);color:var(--text);border:none;border-radius:12px;padding:11px 14px;font-size:15px;outline:none">
-        <button class="btn" id="kw-add">Следить</button>
-      </div>
-    </div>
   </section>
 
   <!-- ================= СПИСОК ================= -->
@@ -446,27 +440,41 @@
   $('tab-list').onclick = function () { show('list'); };
 
   // ---------- источники (чипы) ----------
+  const PLACEHOLDERS = {
+    afisha: 'Исполнитель, событие, площадка…',
+    ticketpro: 'Ключевое слово для Ticketpro…',
+    all: 'Ключевое слово (все источники)…',
+  };
+  const KEYWORD_HINTS = {
+    ticketpro: 'У Ticketpro нет открытого браузерного поиска. Введите слово — бот будет ' +
+      'искать его на ticketpro.by по совпадению и сообщит, когда появятся билеты.',
+    all: 'Бот будет искать это слово и на Афише / ByCard, и на Ticketpro по совпадению ' +
+      'и сообщит, когда появятся билеты.',
+  };
+  function applySource() {
+    $('q').placeholder = PLACEHOLDERS[source] || PLACEHOLDERS.afisha;
+    const isKeyword = source !== 'afisha';
+    $('keyword-actions').classList.toggle('hidden', !isKeyword);
+    $('results').classList.toggle('hidden', isKeyword);
+    if (isKeyword) {
+      $('keyword-hint').textContent = KEYWORD_HINTS[source] || '';
+      $('results').innerHTML = '';
+    } else if ($('q').value.trim()) {
+      runSearch($('q').value.trim());
+    }
+  }
   document.querySelectorAll('.chip').forEach(function (c) {
     c.onclick = function () {
       document.querySelectorAll('.chip').forEach(function (x) { x.classList.remove('active'); });
       c.classList.add('active');
       source = c.dataset.src;
-      $('tp-panel').classList.toggle('hidden', source !== 'ticketpro');
-      $('results').innerHTML = '';
-      if (source === 'ticketpro') {
-        $('kw-input').value = $('q').value;
-        $('keyword-panel').classList.remove('hidden');
-      } else if (currentQuery) {
-        runSearch(currentQuery);
-      }
+      applySource();
     };
   });
 
   // ---------- поиск по Афише ----------
   async function runSearch(q) {
     currentQuery = q;
-    $('keyword-panel').classList.remove('hidden');
-    $('kw-input').value = q;
     $('results').innerHTML = '<div class="spinner"></div>';
     const url = AFISHA_API + '?target=site&search[query]=' + encodeURIComponent(q) + '&search[type]=1';
     let data;
@@ -480,7 +488,7 @@
     const performances = (data.performances && data.performances.items) || [];
     const objects = (data.objects && data.objects.items) || [];
     if (!performances.length && !objects.length) {
-      $('results').innerHTML = '<div class="hint-block">Ничего не нашлось. Добавьте ключевое слово ниже — бот будет искать его на всех источниках, включая Ticketpro.</div>';
+      $('results').innerHTML = '<div class="hint-block">Ничего не нашлось. Попробуйте другой запрос — или выберите «Все источники — ключевое слово» и следите за словом.</div>';
       return;
     }
     let html = '';
@@ -560,20 +568,20 @@
     }
   });
 
-  // ввод поиска (дебаунс)
+  // ввод поиска (дебаунс; в keyword-режимах кнопка «Следить» читает значение сама)
   $('q').addEventListener('input', function () {
     clearTimeout(searchTimer);
     const v = $('q').value.trim();
-    if (source === 'ticketpro') { $('kw-input').value = v; return; }
+    if (source !== 'afisha') return;
     if (!v) { $('results').innerHTML = ''; return; }
     searchTimer = setTimeout(function () { runSearch(v); }, 450);
   });
 
-  // ключевое слово
+  // ключевое слово (режимы Ticketpro / Все источники)
   $('kw-add').onclick = function () {
-    const kw = ($('kw-input').value || $('q').value).trim();
+    const kw = $('q').value.trim();
     if (!kw) { toast('Введите ключевое слово'); return; }
-    const src = source === 'ticketpro' ? 'ticketpro' : 'all';
+    const src = source === 'afisha' ? 'all' : source;
     openCityModal('Город для слова', 'В каком городе искать «' + kw + '»?', CITIES, function (city) {
       const meta = city ? ' (' + cityLabelStatic(city) + ')' : '';
       const ok = send({ a: 'add', k: 'query', s: src, q: kw, c: city });
@@ -597,6 +605,7 @@
   // ---------- старт ----------
   watchlist = readWatchlist();
   renderWatchlist();
+  applySource();
 })();
 </script>
 </body>
