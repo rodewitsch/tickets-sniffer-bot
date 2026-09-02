@@ -15,6 +15,7 @@ import { runCheck } from './lib/checker.js';
 import { runMigrations } from './migrate.js';
 import { fetchEventCities, AFISHA_HOSTS } from './lib/sources/afisha.js';
 import { searchTicketpro, searchTicketproVenues } from './lib/sources/ticketpro.js';
+import { searchBezkassira, fetchBezkassiraOrganizer } from './lib/sources/bezkassira.js';
 import { cityLabel } from './lib/cities.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -180,6 +181,49 @@ async function handleTicketproSearch(req, res, url) {
   }
 }
 
+// GET /api/bezkassira-search?q=<word> — живой поиск BezKassira для Mini App.
+async function handleBezkassiraSearch(req, res, url) {
+  const q = (url.searchParams.get('q') || '').trim().slice(0, 120);
+  if (!q) return sendHeaders(res, corsHeaders(req), 400, { ok: false, error: 'bad_query' });
+  try {
+    const events = await searchBezkassira(q);
+    sendHeaders(res, corsHeaders(req), 200, {
+      ok: true,
+      events: events.slice(0, 20).map((e) => ({
+        uid: e.uid, title: e.title, url: e.url, image: e.image,
+        venue: e.venue, city: e.city,
+      })),
+    });
+  } catch (err) {
+    console.error('bezkassira-search error:', err && err.message || err);
+    sendHeaders(res, corsHeaders(req), 500, { ok: false, error: 'server_error' });
+  }
+}
+
+// GET /api/bezkassira-organizer?url=<eventUrl> — организатор события (для
+// отслеживания «площадки»). Валидируем хост (SSRF-защита).
+async function handleBezkassiraOrganizer(req, res, url) {
+  const target = url.searchParams.get('url') || '';
+  let parsed;
+  try {
+    parsed = new URL(target);
+  } catch {
+    return sendHeaders(res, corsHeaders(req), 400, { ok: false, error: 'bad_url' });
+  }
+  const host = parsed.hostname.toLowerCase();
+  if (host !== 'bezkassira.by' && !host.endsWith('.bezkassira.by')) {
+    return sendHeaders(res, corsHeaders(req), 400, { ok: false, error: 'host_not_allowed' });
+  }
+  try {
+    const organizer = await fetchBezkassiraOrganizer(parsed.toString());
+    if (!organizer) return sendHeaders(res, corsHeaders(req), 404, { ok: false, error: 'not_found' });
+    sendHeaders(res, corsHeaders(req), 200, { ok: true, organizer });
+  } catch (err) {
+    console.error('bezkassira-organizer error:', err && err.message || err);
+    sendHeaders(res, corsHeaders(req), 500, { ok: false, error: 'server_error' });
+  }
+}
+
 function sendHeaders(res, headers, status, obj) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', ...headers });
   res.end(JSON.stringify(obj));
@@ -236,6 +280,26 @@ const server = http.createServer(async (req, res) => {
       }
       if (req.method === 'GET') {
         return await handleTicketproSearch(req, res, url);
+      }
+    }
+    if (url.pathname === '/api/bezkassira-search') {
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204, corsHeaders(req));
+        res.end();
+        return;
+      }
+      if (req.method === 'GET') {
+        return await handleBezkassiraSearch(req, res, url);
+      }
+    }
+    if (url.pathname === '/api/bezkassira-organizer') {
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204, corsHeaders(req));
+        res.end();
+        return;
+      }
+      if (req.method === 'GET') {
+        return await handleBezkassiraOrganizer(req, res, url);
       }
     }
     if (url.pathname === '/health' && req.method === 'GET') {

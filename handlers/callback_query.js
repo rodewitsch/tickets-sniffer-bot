@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { HELP, renderWatchlist, watchlistKeyboard, mainMenuKeyboard } from '../lib/menus.js';
-import { listWatchItems, removeWatchItem, deactivateWatchItem, miniAppUrl, miniAppConfigured } from '../lib/watch.js';
+import { listWatchItems, removeWatchItem, deactivateWatchItem, miniAppUrl, miniAppConfigured, SOURCE_LABEL } from '../lib/watch.js';
 import { addWatchItem } from '../lib/watch.js';
 import { sendFreshReplyKeyboard } from '../lib/reply.js';
 
@@ -65,7 +65,7 @@ export default async function (cb) {
     const res = await addWatchItem({ chatId, kind: 'query', source, query });
     const text = res?.duplicate
       ? `«${query}» уже есть в списке отслеживания.`
-      : `✅ Слежу за запросом «${query}» (${source === 'all' ? 'все источники' : source}).`;
+      : `✅ Слежу за запросом «${query}» (${SOURCE_LABEL[source] || source}).`;
     if (isEditable) {
       // Убираем исходное сообщение с кнопками выбора источника — вопрос решён,
       // чтобы кнопки «Везде/Афиша/Ticketpro/Отмена» не оставались кликабельными.
