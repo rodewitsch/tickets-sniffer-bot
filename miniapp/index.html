@@ -442,18 +442,16 @@
   // ---------- источники (чипы) ----------
   const PLACEHOLDERS = {
     afisha: 'Исполнитель, событие, площадка…',
-    ticketpro: 'Ключевое слово для Ticketpro…',
+    ticketpro: 'Исполнитель, событие, площадка…',
     all: 'Ключевое слово (все источники)…',
   };
   const KEYWORD_HINTS = {
-    ticketpro: 'У Ticketpro нет открытого браузерного поиска. Введите слово — бот будет ' +
-      'искать его на ticketpro.by по совпадению и сообщит, когда появятся билеты.',
     all: 'Бот будет искать это слово и на Афише / ByCard, и на Ticketpro по совпадению ' +
       'и сообщит, когда появятся билеты.',
   };
   function applySource() {
     $('q').placeholder = PLACEHOLDERS[source] || PLACEHOLDERS.afisha;
-    const isKeyword = source !== 'afisha';
+    const isKeyword = source === 'all';
     $('keyword-actions').classList.toggle('hidden', !isKeyword);
     $('results').classList.toggle('hidden', isKeyword);
     if (isKeyword) {
@@ -472,10 +470,72 @@
     };
   });
 
+  // ---------- поиск по Ticketpro (через эндпоинт бота, обходит CORS) ----------
+  async function runTicketproSearch(q) {
+    if (!BOT_API) {
+      $('results').innerHTML = '<div class="hint-block">Для живого поиска Ticketpro укажите api-домен бота (?api=… в адресе Mini App).</div>';
+      return;
+    }
+    let data;
+    try {
+      const res = await fetch(BOT_API + '/api/ticketpro-search?q=' + encodeURIComponent(q),
+        { headers: { Accept: 'application/json' } });
+      data = await res.json();
+    } catch (e) {
+      $('results').innerHTML = '<div class="hint-block">Не удалось выполнить поиск. Попробуйте ещё раз.</div>';
+      return;
+    }
+    const events = (data && data.events) || [];
+    const venues = (data && data.venues) || [];
+    if (!events.length && !venues.length) {
+      $('results').innerHTML = '<div class="hint-block">Ничего не нашлось. Попробуйте другой запрос — или выберите «Все источники — ключевое слово» и следите за словом.</div>';
+      return;
+    }
+    let html = '';
+    events.slice(0, 20).forEach(function (e) {
+      const meta = [e.venue, e.city].filter(Boolean).join(', ');
+      const metaParts = [];
+      if (meta) metaParts.push(meta);
+      if (e.dateText) metaParts.push(e.dateText);
+      let price = '';
+      if (e.priceFrom) {
+        price = e.priceTo && e.priceTo !== e.priceFrom
+          ? 'от ' + e.priceFrom + ' до ' + e.priceTo + ' ' + (e.currency || 'BYN')
+          : 'от ' + e.priceFrom + ' ' + (e.currency || 'BYN');
+      }
+      html += '<div class="card">' +
+        (e.image ? '<img class="thumb" src="' + esc(e.image) + '" alt="" loading="lazy">'
+                 : '<div class="thumb placeholder">🎫</div>') +
+        '<div class="info">' +
+          '<div class="title">' + esc(e.title) + '</div>' +
+          '<div class="meta">' + esc(metaParts.join(' · ') || 'Событие') + '</div>' +
+          (price ? '<div class="meta">💰 ' + esc(price) + '</div>' : '') +
+          '<div class="actions">' +
+            '<button class="btn" data-add-event="1" data-title="' + esc(e.title) + '" data-url="' + esc(e.url) + '" data-src="ticketpro">Следить</button>' +
+            '<a class="btn ghost" href="' + esc(e.url) + '" target="_blank" rel="noopener">Открыть</a>' +
+          '</div>' +
+        '</div></div>';
+    });
+    venues.slice(0, 10).forEach(function (v) {
+      html += '<div class="card">' +
+        (v.image ? '<img class="thumb" src="' + esc(v.image) + '" alt="" loading="lazy">'
+                 : '<div class="thumb placeholder">🏟</div>') +
+        '<div class="info">' +
+          '<div class="title">' + esc(v.name) + '</div>' +
+          '<div class="meta">Площадка · Ticketpro</div>' +
+          '<div class="actions">' +
+            '<button class="btn" data-add-venue="1" data-title="' + esc(v.name) + '" data-url="' + esc(v.url) + '" data-src="ticketpro">Следить за площадкой</button>' +
+          '</div>' +
+        '</div></div>';
+    });
+    $('results').innerHTML = html;
+  }
+
   // ---------- поиск по Афише ----------
   async function runSearch(q) {
     currentQuery = q;
     $('results').innerHTML = '<div class="spinner"></div>';
+    if (source === 'ticketpro') { await runTicketproSearch(q); return; }
     const url = AFISHA_API + '?target=site&search[query]=' + encodeURIComponent(q) + '&search[type]=1';
     let data;
     try {
@@ -529,7 +589,15 @@
     if (evBtn) {
       const title = evBtn.dataset.title;
       const url = evBtn.dataset.url;
+      const src = evBtn.dataset.src || 'afisha';
       if (evBtn.classList.contains('done')) return;
+      if (src === 'ticketpro') {
+        evBtn.classList.add('done'); evBtn.textContent = '✓ Слежу';
+        const ok = send({ a: 'add', k: 'event', s: 'ticketpro', q: title, u: url, t: title });
+        haptic('medium');
+        if (ok) toast('Добавлено! Бот подтвердит в чате');
+        return;
+      }
       evBtn.classList.add('done'); evBtn.textContent = '…';
       // Пробуем получить города события; при удаче показываем пикер, иначе — просто добавляем.
       eventCities(url).then(function (cities) {
@@ -556,7 +624,15 @@
     if (vBtn) {
       const title = vBtn.dataset.title;
       const url = vBtn.dataset.url;
+      const src = vBtn.dataset.src || 'afisha';
       if (vBtn.classList.contains('done')) return;
+      if (src === 'ticketpro') {
+        vBtn.classList.add('done'); vBtn.textContent = '✓ Слежу';
+        const ok = send({ a: 'add', k: 'venue', s: 'ticketpro', q: title, u: url, t: title });
+        haptic('medium');
+        if (ok) toast('Добавлено! Бот подтвердит в чате');
+        return;
+      }
       vBtn.classList.add('done'); vBtn.textContent = '…';
       openCityModal('Город площадки', 'В каком городе следить за площадкой «' + title + '»?', CITIES.slice(0, 6), function (city) {
         vBtn.textContent = '✓ Слежу';
@@ -572,7 +648,7 @@
   $('q').addEventListener('input', function () {
     clearTimeout(searchTimer);
     const v = $('q').value.trim();
-    if (source !== 'afisha') return;
+    if (source === 'all') return;
     if (!v) { $('results').innerHTML = ''; return; }
     searchTimer = setTimeout(function () { runSearch(v); }, 450);
   });
@@ -581,7 +657,7 @@
   $('kw-add').onclick = function () {
     const kw = $('q').value.trim();
     if (!kw) { toast('Введите ключевое слово'); return; }
-    const src = source === 'afisha' ? 'all' : source;
+    const src = source;
     openCityModal('Город для слова', 'В каком городе искать «' + kw + '»?', CITIES, function (city) {
       const meta = city ? ' (' + cityLabelStatic(city) + ')' : '';
       const ok = send({ a: 'add', k: 'query', s: src, q: kw, c: city });

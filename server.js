@@ -14,6 +14,7 @@ import { PORT, CHECK_SECRET } from './env.js';
 import { runCheck } from './lib/checker.js';
 import { runMigrations } from './migrate.js';
 import { fetchEventCities, AFISHA_HOSTS } from './lib/sources/afisha.js';
+import { searchTicketpro, searchTicketproVenues } from './lib/sources/ticketpro.js';
 import { cityLabel } from './lib/cities.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -151,6 +152,34 @@ async function handleEventCities(req, res, url) {
   }
 }
 
+// GET /api/ticketpro-search?q=<word> — живой поиск Ticketpro для Mini App:
+// события (страница расширенного поиска) + площадки (кэш списка площадок).
+async function handleTicketproSearch(req, res, url) {
+  const q = (url.searchParams.get('q') || '').trim().slice(0, 120);
+  if (!q) return sendHeaders(res, corsHeaders(req), 400, { ok: false, error: 'bad_query' });
+  try {
+    const [events, venues] = await Promise.all([
+      searchTicketpro(q),
+      searchTicketproVenues(q),
+    ]);
+    sendHeaders(res, corsHeaders(req), 200, {
+      ok: true,
+      events: events.slice(0, 20).map((e) => ({
+        uid: e.uid, title: e.title, url: e.url, image: e.image,
+        city: e.city, venue: e.venue, dateText: e.dateText,
+        priceFrom: e.priceFrom, priceTo: e.priceTo, currency: e.currency,
+        onSale: e.onSale, status: e.status,
+      })),
+      venues: venues.slice(0, 10).map((v) => ({
+        name: v.name, city: v.city, url: v.url, image: v.image,
+      })),
+    });
+  } catch (err) {
+    console.error('ticketpro-search error:', err && err.message || err);
+    sendHeaders(res, corsHeaders(req), 500, { ok: false, error: 'server_error' });
+  }
+}
+
 function sendHeaders(res, headers, status, obj) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', ...headers });
   res.end(JSON.stringify(obj));
@@ -197,6 +226,16 @@ const server = http.createServer(async (req, res) => {
       }
       if (req.method === 'GET') {
         return await handleEventCities(req, res, url);
+      }
+    }
+    if (url.pathname === '/api/ticketpro-search') {
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204, corsHeaders(req));
+        res.end();
+        return;
+      }
+      if (req.method === 'GET') {
+        return await handleTicketproSearch(req, res, url);
       }
     }
     if (url.pathname === '/health' && req.method === 'GET') {
