@@ -2,6 +2,7 @@ import { api } from '../api.js';
 import { HELP, renderWatchlist, watchlistKeyboard, mainMenuKeyboard } from '../lib/menus.js';
 import { listWatchItems, removeWatchItem, deactivateWatchItem, miniAppUrl, miniAppConfigured } from '../lib/watch.js';
 import { addWatchItem } from '../lib/watch.js';
+import { sendFreshReplyKeyboard } from '../lib/reply.js';
 
 export default async function (cb) {
   const data = cb.data || '';
@@ -47,6 +48,8 @@ export default async function (cb) {
     } else {
       await api.sendMessage({ chat_id: chatId, text, parse_mode: 'HTML', reply_markup: kb });
     }
+    // Обновляем reply-клавиатуру (кнопка Mini App) — свежий снапшот списка.
+    await sendFreshReplyKeyboard(chatId, '🗑 Позиция удалена из списка отслеживания.');
     return;
   }
 
@@ -73,16 +76,21 @@ export default async function (cb) {
     } else {
       await api.sendMessage({ chat_id: chatId, text });
     }
+    // Обновляем reply-клавиатуру (кнопка Mini App) — свежий снапшот списка.
+    await sendFreshReplyKeyboard(chatId, text);
     return;
   }
 
   if (data.startsWith('mute:')) {
     const id = Number(data.slice(5));
-    await deactivateWatchItem(id);
+    await deactivateWatchItem(chatId, id);
     try {
       await api.editMessageReplyMarkup({ chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [] } });
     } catch { /* сообщение могло измениться */ }
-    await api.sendMessage({ chat_id: chatId, text: '🔕 Уведомления по этой позиции отключены.' });
+    const text = '🔕 Уведомления по этой позиции отключены.';
+    await api.sendMessage({ chat_id: chatId, text });
+    // Обновляем reply-клавиатуру (кнопка Mini App) — позиция скрыта из списка.
+    await sendFreshReplyKeyboard(chatId, text);
     return;
   }
 }
