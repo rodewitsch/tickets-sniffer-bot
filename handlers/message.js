@@ -3,14 +3,17 @@ import { db } from '../db.js';
 import { users } from '../schema.js';
 import { sql } from '../db.js';
 import {
-  WELCOME, HELP,
+  WELCOME, HELP, helpKeyboard,
   mainMenuKeyboard, mainReplyKeyboard, proposeAddKeyboard, proposeAddText,
   renderWatchlist, watchlistKeyboard,
 } from '../lib/menus.js';
 import { listWatchItems, miniAppUrl, miniAppConfigured } from '../lib/watch.js';
 import { handleWebAppData } from '../lib/webapp.js';
 import { sendStatsReport } from '../lib/stats.js';
+import { sendFreshReplyKeyboard } from '../lib/reply.js';
 import { STATS_CHAT_ID } from '../lib/config.js';
+import { feedbackSession, clearFeedback } from '../lib/feedback.js';
+import { escapeHtml } from '../lib/util.js';
 
 export default async function (message) {
   const chat = message.chat;
@@ -58,7 +61,7 @@ export default async function (message) {
   }
 
   if (text === '/help' || text === 'ℹ️ Помощь') {
-    await api.sendMessage({ chat_id: chatId, text: HELP, parse_mode: 'HTML' });
+    await api.sendMessage({ chat_id: chatId, text: HELP, parse_mode: 'HTML', reply_markup: helpKeyboard() });
     return;
   }
 
@@ -92,6 +95,32 @@ export default async function (message) {
       chat_id: chatId,
       text: 'Не знаю такую команду. Доступны: /start, /list, /stats, /help',
     });
+    return;
+  }
+
+  // Режим «написать владельцу» из Помощи: следующее текстовое сообщение — это
+  // обращение (ошибка/пожелание), а не ключевое слово для отслеживания.
+  // Пересылаем его владельцу (STATS_CHAT_ID) с данными отправителя.
+  if (feedbackSession(chatId)) {
+    clearFeedback(chatId);
+    const from = message.from || {};
+    const name = from.first_name || message.chat?.title || '?';
+    const userTag = from.username ? `@${from.username}` : '';
+    const header = `✍️ <b>Обращение</b>\nОт: ${escapeHtml(name)} ${userTag ? escapeHtml(userTag) : ''} (id=${chatId})\n\n`;
+    try {
+      await api.sendMessage({
+        chat_id: STATS_CHAT_ID,
+        text: header + escapeHtml(text.slice(0, 3000)),
+        parse_mode: 'HTML',
+      });
+      await sendFreshReplyKeyboard(chatId, '✅ Спасибо! Я передал ваше сообщение разработчику.');
+    } catch (e) {
+      console.error('feedback forward failed:', e && e.message || e);
+      await api.sendMessage({
+        chat_id: chatId,
+        text: '⚠️ Не удалось отправить сообщение. Попробуйте ещё раз позже или напишите /feedback.',
+      });
+    }
     return;
   }
 

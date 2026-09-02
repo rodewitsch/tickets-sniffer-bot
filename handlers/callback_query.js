@@ -1,8 +1,17 @@
 import { api } from '../api.js';
-import { HELP, renderWatchlist, watchlistKeyboard, mainMenuKeyboard } from '../lib/menus.js';
+import { HELP, helpKeyboard, renderWatchlist, watchlistKeyboard, mainMenuKeyboard } from '../lib/menus.js';
 import { listWatchItems, removeWatchItem, deactivateWatchItem, miniAppUrl, miniAppConfigured, SOURCE_LABEL } from '../lib/watch.js';
 import { addWatchItem } from '../lib/watch.js';
 import { sendFreshReplyKeyboard } from '../lib/reply.js';
+import { startFeedback, clearFeedback } from '../lib/feedback.js';
+
+// Промпт режима ввода обращения + кнопка «Отмена» (инлайн на том же сообщении).
+const FEEDBACK_PROMPT_TEXT =
+  '✍️ <b>Напишите сообщение здесь</b> — я передам его разработчику.\n\n' +
+  'Опишите, что случилось (ошибка) или что хотите предложить, и отправьте одним текстовым сообщением.';
+function feedbackPromptKeyboard() {
+  return { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'feedback:cancel' }]] };
+}
 
 export default async function (cb) {
   const data = cb.data || '';
@@ -33,9 +42,33 @@ export default async function (cb) {
 
   if (data === 'help') {
     if (isEditable) {
-      await api.editMessageText({ chat_id: chatId, message_id: msgId, text: HELP, parse_mode: 'HTML' });
+      await api.editMessageText({ chat_id: chatId, message_id: msgId, text: HELP, parse_mode: 'HTML', reply_markup: helpKeyboard() });
     } else {
-      await api.sendMessage({ chat_id: chatId, text: HELP, parse_mode: 'HTML' });
+      await api.sendMessage({ chat_id: chatId, text: HELP, parse_mode: 'HTML', reply_markup: helpKeyboard() });
+    }
+    return;
+  }
+
+  if (data === 'feedback:start') {
+    // Включаем режим ввода обращения: следующее текстовое сообщение бот
+    // отправит владельцу (см. handlers/message.js), а не предложит как ключевое слово.
+    startFeedback(chatId);
+    const text = FEEDBACK_PROMPT_TEXT;
+    const kb = feedbackPromptKeyboard();
+    if (isEditable) {
+      await api.editMessageText({ chat_id: chatId, message_id: msgId, text, parse_mode: 'HTML', reply_markup: kb });
+    } else {
+      await api.sendMessage({ chat_id: chatId, text, parse_mode: 'HTML', reply_markup: kb });
+    }
+    return;
+  }
+
+  if (data === 'feedback:cancel') {
+    clearFeedback(chatId);
+    if (isEditable) {
+      await api.editMessageText({ chat_id: chatId, message_id: msgId, text: 'Отменено 🙂', parse_mode: 'HTML', reply_markup: { inline_keyboard: [] } });
+    } else {
+      await api.sendMessage({ chat_id: chatId, text: 'Отменено 🙂 Если понадобится помощь — напишите /help.' });
     }
     return;
   }
