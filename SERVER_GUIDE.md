@@ -6,6 +6,10 @@
 - Проект на сервере: `/opt/tickets-bot`
 - Docker Compose: `bot` (вебхук), `cron` (проверки), `web` (Caddy/HTTPS)
 
+> Хотите разобрать **структуру кода**, запустить проект **локально** для разработки
+> или понять технические детали (например, как устроен выбор города)? — см. раздел
+> [Для разработчиков](#для-разработчиков) внизу.
+
 ---
 
 ## 1. Контейнеры
@@ -143,3 +147,76 @@ docker compose start
   ```bash
   df -h
   ```
+
+---
+
+## Для разработчиков
+
+Всё техническое, что нужно тем, кто хочет понять код или запустить проект локально.
+
+### Структура проекта
+
+| Путь | Назначение |
+|------|-----------|
+| `schema.js` | Схема БД (Drizzle `sqliteTable`). |
+| `db.js` | Слой SQLite: `drizzle(better-sqlite3)` + ре-экспорт операторов. |
+| `drizzle/` | Миграции (генерирует `drizzle-kit`, применяет `migrate`). |
+| `api.js` | Telegram Bot API (`api.<method>` → unwrapped, `BotApiError`). |
+| `env.js` | Конфиг из `process.env` (`BOT_TOKEN`, `PORT`, `DB_PATH`, …). |
+| `handlers/` | Вебхук-хендлеры (`message`, `callback_query`), вызываются из `server.js`. |
+| `lib/` | Бизнес-логика: `checker`, `watch`, `menus`, `webapp`, `util`, `http`, `jsonld`, `normalize`, `config`, `sources/{afisha,ticketpro,bezkassira}`. |
+| `server.js` | HTTP-сервер вебхука (`/webhook`, `/check`, `/health`). |
+| `cron.js` | Демон проверки билетов (docker-сервис `cron`). |
+| `Dockerfile`, `docker-compose.yml`, `Caddyfile` | Контейнеры + HTTPS. |
+| `miniapp/` | Статика Telegram Mini App (публикуется на GitHub Pages). |
+| `.github/workflows/` | Автодеплой на droplet (`deploy.yml`) + публикация Mini App (`pages.yml`). |
+
+Источники билетов (`lib/config.js`): `afisha` (24afisha.by / bycard.by),
+`ticketpro` (Ticketpro.by) и `bezkassira` (BezKassira.by).
+
+### Локальная разработка (вне Docker)
+
+```sh
+npm install
+node migrate.js                # создать таблицы (применить миграции)
+BOT_TOKEN=<токен> node server.js   # локальный запуск вебхука
+```
+
+Для локальной разработки не нужен публичный вебхук — можно гонять `check.js`
+(разовый цикл проверки) или `cron.js` напрямую.
+
+### Тесты
+
+Smoke-тест проверяет слой `db` (SQLite DSL) на реальной базе:
+
+```sh
+npm test   # = npm run smoke → node smoke.mjs
+```
+
+### Мини-приложение
+
+- Статика в `miniapp/`, публикуется workflow `pages.yml` на GitHub Pages
+  (сервер её не отдаёт — `SERVE_STATIC` выключен в Docker).
+- `MINIAPP_URL` в `lib/config.js` указывает на Pages-URL; параметр
+  `&api=https://ВАШ-ДОМЕН` включает выбор городов события (`GET /api/event-cities`).
+- Mini App передаёт данные боту через `WebApp.sendData` (payload вида
+  `{ a: 'add'|'del', k, s, q, u, c }`).
+
+### Наличие билетов по городу (технически)
+
+События 24afisha.by / bycard.by живут по одному URL на город
+(`/ru/<город>/event/<slug>`), и расписание/наличие билетов различается между
+городами. Семантика `watch_items.city`:
+
+- `city` NULL — город не выбран (по умолчанию город события из его URL).
+- `city` = `brest` — следить только за Брестом.
+- `city` = `all` — следить во всех городах (уведомить, если билеты появятся хоть где-то).
+
+Наличие по выбранному городу берётся из schedule API «Афиши», а не из JSON-LD:
+`GET api.24afisha.by/api/v2/schedule/events/<числовой-id события>?cityId=<N>` →
+`data[0].objects[].sessions[].isSaleOpen`. Список городов — `GET /api/v2/cities`
+(slug → id). Кино размечено в JSON-LD как `Movie` (без offers/location), поэтому
+для него JSON-LD бесполезен — работает только schedule API.
+
+Afisha `events.uid` — city-aware: `'<slug>@<city>'` (см. `afishaUidForCity`).
+Одно и то же событие кэшируется отдельно по городам.
