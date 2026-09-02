@@ -6,6 +6,10 @@
   "engines": {
     "node": ">=18"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rodewitsch/tickets-sniffer-bot.git"
+  },
   "dependencies": {
     "better-sqlite3": "^11.3.0",
     "drizzle-orm": "^0.45.2"
@@ -18,12 +22,14 @@
     "db:generate": "drizzle-kit generate",
     "set-webhook": "node scripts/set-webhook.mjs",
     "test": "node smoke.mjs",
+    "release": "standard-version",
     "docker:up": "docker compose up -d --build",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f",
     "docker:ps": "docker compose ps"
   },
   "devDependencies": {
-    "drizzle-kit": "^0.31.10"
+    "drizzle-kit": "^0.31.10",
+    "standard-version": "^9.5.0"
   }
 }

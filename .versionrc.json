@@ -1,0 +1,4 @@
+{
+  "commitUrlFormat": "https://github.com/rodewitsch/tickets-sniffer-bot/commits/{{hash}}",
+  "compareUrlFormat": "https://github.com/rodewitsch/tickets-sniffer-bot/compare/{{previousTag}}...{{currentTag}}"
+}
