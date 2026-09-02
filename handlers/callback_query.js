@@ -67,16 +67,19 @@ export default async function (cb) {
       ? `«${query}» уже есть в списке отслеживания.`
       : `✅ Слежу за запросом «${query}» (${source === 'all' ? 'все источники' : source}).`;
     if (isEditable) {
+      // Убираем исходное сообщение с кнопками выбора источника — вопрос решён,
+      // чтобы кнопки «Везде/Афиша/Ticketpro/Отмена» не оставались кликабельными.
+      // Если удалить не вышло — просто снимем с него клавиатуру.
       try {
-        await api.editMessageText({ chat_id: chatId, message_id: msgId, text });
-      } catch (e) {
-        // Сообщение могло быть уже изменено/удалено — отправим как новое.
-        await api.sendMessage({ chat_id: chatId, text });
+        await api.deleteMessage({ chat_id: chatId, message_id: msgId });
+      } catch {
+        try {
+          await api.editMessageReplyMarkup({ chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [] } });
+        } catch { /* сообщение могло уже измениться/исчезнуть */ }
       }
-    } else {
-      await api.sendMessage({ chat_id: chatId, text });
     }
-    // Обновляем reply-клавиатуру (кнопка Mini App) — свежий снапшот списка.
+    // Единственное подтверждение — сообщение со свежей reply-клавиатурой
+    // (несёт свежий снапшот списка для Mini App). Текст выше не дублируем.
     await sendFreshReplyKeyboard(chatId, text);
     return;
   }
@@ -88,8 +91,8 @@ export default async function (cb) {
       await api.editMessageReplyMarkup({ chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [] } });
     } catch { /* сообщение могло измениться */ }
     const text = '🔕 Уведомления по этой позиции отключены.';
-    await api.sendMessage({ chat_id: chatId, text });
-    // Обновляем reply-клавиатуру (кнопка Mini App) — позиция скрыта из списка.
+    // Единственное подтверждение — сообщение со свежей reply-клавиатурой
+    // (свежий снапшот списка Mini App). Текст отдельным sendMessage не дублируем.
     await sendFreshReplyKeyboard(chatId, text);
     return;
   }
