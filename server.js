@@ -15,7 +15,7 @@ import { runCheck } from './lib/checker.js';
 import { runMigrations } from './migrate.js';
 import { fetchEventCities, AFISHA_HOSTS } from './lib/sources/afisha.js';
 import { searchTicketpro, searchTicketproVenues, enrichTicketproCategories } from './lib/sources/ticketpro.js';
-import { searchBezkassira, fetchBezkassiraOrganizer } from './lib/sources/bezkassira.js';
+import { searchBezkassira, fetchBezkassiraOrganizer, enrichBezkassiraCategories } from './lib/sources/bezkassira.js';
 import { cityLabel } from './lib/cities.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -190,11 +190,15 @@ async function handleBezkassiraSearch(req, res, url) {
   const q = (url.searchParams.get('q') || '').trim().slice(0, 120);
   if (!q) return sendHeaders(res, corsHeaders(req), 400, { ok: false, error: 'bad_query' });
   try {
-    const events = await searchBezkassira(q);
+    const found = await searchBezkassira(q);
+    // Тип (кино/театр/концерт/…) в выдаче BezKassira не выводится и в URL события
+    // не зашит — читаем его из хлебных крошек страницы события (как тип у bycard).
+    const events = await enrichBezkassiraCategories(found);
     sendHeaders(res, corsHeaders(req), 200, {
       ok: true,
       events: events.slice(0, 20).map((e) => ({
         uid: e.uid, title: e.title, url: e.url, image: e.image,
+        category: e.category || null,
         venue: e.venue, city: e.city,
       })),
     });

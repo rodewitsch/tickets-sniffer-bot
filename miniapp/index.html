@@ -558,13 +558,19 @@
     }
     let html = '';
     events.slice(0, 20).forEach(function (e) {
-      const meta = [e.venue, e.city].filter(Boolean).join(', ');
+      // Тип события (кино/театр/концерт/…) показываем первым, как у bycard.
+      const metaParts = [];
+      if (e.category) metaParts.push(e.category);
+      const venueCity = [e.venue, e.city].filter(Boolean).join(', ');
+      if (venueCity) metaParts.push(venueCity);
+      metaParts.push('BezKassira');
+      const meta = metaParts.join(' · ');
       html += '<div class="card">' +
         (e.image ? '<img class="thumb" src="' + esc(e.image) + '" alt="" loading="lazy">'
                  : '<div class="thumb placeholder">🎫</div>') +
         '<div class="info">' +
           '<div class="title">' + esc(e.title) + '</div>' +
-          '<div class="meta">' + (esc(meta) || 'Событие') + ' · BezKassira</div>' +
+          '<div class="meta">' + (esc(meta) || 'Событие') + '</div>' +
           '<div class="actions">' +
             '<button class="btn" data-add-event="1" data-title="' + esc(e.title) + '" data-url="' + esc(e.url) + '" data-src="bezkassira">Следить</button>' +
             '<button class="btn ghost" data-add-org="1" data-title="' + esc(e.title) + '" data-url="' + esc(e.url) + '">Организатор</button>' +
