@@ -66,7 +66,8 @@ Compose (`bot`, `cron`, `web`/Caddy).
 
 - Dev: `npm install`, set `BOT_TOKEN`, `npm run migrate`, `npm start`.
 - Prod (Droplet): `docker compose up -d --build` — bots start `bot` (webhook) and
-  `cron` (check loop); `web` (Caddy) gives HTTPS. See `DEPLOY_DROPLET.md`.
+  `cron` (check loop); `web` (Caddy) gives HTTPS. See `docs/DEPLOY_DROPLET.md` and
+  `docs/SERVER_GUIDE.md` (also covers release broadcasts via `scripts/send-release.mjs` + `messages/`).
 - Auto-deploy: GitHub Actions `.github/workflows/deploy.yml` → builds image → `docker save` → scp to
   droplet → `docker load` → `docker compose up -d` (no git on server). Secrets: `DROPLET_HOST`,
   `DROPLET_USER`, `DROPLET_PASSWORD`. Path to project is hardcoded (`/opt/tickets-bot`).

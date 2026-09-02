@@ -150,6 +150,67 @@ docker compose start
 
 ---
 
+## 6. Рассылки (аннонсы версий)
+
+Периодически нужно сообщить пользователям о новой версии бота. Для этого есть
+одноразовый скрипт `scripts/send-release.mjs` и папка `messages/` с текстами.
+
+### Принцип
+
+- **Текст сообщения — отдельный файл**, а не код: на каждый релиз кладётся свой
+  `messages/<версия>.txt`. Так рассылка переиспользуется, не требуя правки скрипта.
+- **Скрипт в двух режимах:**
+  - `preview` — отправить текст только **владельцу** (`STATS_CHAT_ID`), чтобы проверить, как выглядит сообщение;
+  - `broadcast` — разослать **всем пользователям** из таблицы `users` (последовательно, ~20 сообщений/сек,
+    чаты, заблокировавшие бота, пропускаются с логом, не роняя рассылку).
+- Сообщение шлётся с `parse_mode: 'HTML'`, поэтому в файле можно использовать
+  `<b>`, `<i>`, эмодзи и переносы строк.
+
+### Текст файла
+
+Файл `messages/<версия>.txt` — просто текст сообщения. Например `messages/0.2.0.txt`.
+Никакой разметки-обёртки не нужно; пустые строки дают абзацы.
+
+### Запуск
+
+**Локально (проверка синтаксиса текста, без реальной отправки — нет токена):**
+```bash
+node scripts/send-release.mjs preview messages/0.2.0.txt   # → ошибка BOT_TOKEN, если токен не задан
+```
+
+**На сервере (реальная отправка).** Скрипт и текст не входят в Docker-образ, поэтому
+закидываем их в работающий контейнер и запускаем (`BOT_TOKEN` и `DB_PATH` уже в
+окружении контейнера):
+```bash
+# локально: задеплоить скрипт и текст в контейнер
+scp scripts/send-release.mjs messages/0.2.0.txt root@209.38.249.69:/tmp/
+
+# на сервере
+ssh root@209.38.249.69
+cd /opt/tickets-bot
+docker cp /tmp/send-release.mjs  tickets-bot:/app/scripts/send-release.mjs
+docker cp /tmp/0.2.0.txt         tickets-bot:/app/messages/0.2.0.txt
+
+# 1) предпросмотр владельцу -> посмотреть в Telegram, поправить текст при необходимости
+docker compose exec -T bot node scripts/send-release.mjs preview messages/0.2.0.txt
+
+# 2) после одобрения — рассылка всем
+docker compose exec -T bot node scripts/send-release.mjs broadcast messages/0.2.0.txt
+```
+
+Ожидаемый вывод broadcast:
+```
+[broadcast] 3 users
+[broadcast] done: 3 sent, 0 failed
+```
+
+> ⚠️ Файлы, закинутые `docker cp`, исчезают при пересборке Docker-образа
+> (`docker compose up -d --build`). На каждый новый релиз повторите шаги заливки
+> скрипта и свежего текста. Если захотите, чтобы рассылка жила в образе всегда,
+> пропишите `COPY scripts/ messages/ /app/` в `Dockerfile`.
+
+---
+
 ## Для разработчиков
 
 Всё техническое, что нужно тем, кто хочет понять код или запустить проект локально.
@@ -169,6 +230,8 @@ docker compose start
 | `cron.js` | Демон проверки билетов (docker-сервис `cron`). |
 | `Dockerfile`, `docker-compose.yml`, `Caddyfile` | Контейнеры + HTTPS. |
 | `miniapp/` | Статика Telegram Mini App (публикуется на GitHub Pages). |
+| `scripts/` | Служебные утилиты: `set-webhook.mjs`, `send-release.mjs` (рассылки). |
+| `messages/` | Тексты рассылок по версиям, напр. `0.2.0.txt` (см. раздел «Рассылки»). |
 | `.github/workflows/` | Автодеплой на droplet (`deploy.yml`) + публикация Mini App (`pages.yml`). |
 
 Источники билетов (`lib/config.js`): `afisha` (24afisha.by / bycard.by),
