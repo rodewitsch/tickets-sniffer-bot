@@ -14,7 +14,22 @@ export default async function (cb) {
     await api.answerCallbackQuery({ callback_query_id: cb.id });
   } catch { /* уже поздно */ }
 
-  if (data === 'noop') return;
+  if (data === 'cancel:add') {
+    // Отмена предложения «Добавить <слово> в отслеживание?». Вопрос снят —
+    // убираем исходное сообщение с кнопками выбора источника, чтобы кнопки
+    // «Везде/Афиша/Ticketpro/BezKassira» не оставались кликабельными.
+    // Если удалить не вышло — просто снимем с него клавиатуру.
+    if (isEditable) {
+      try {
+        await api.deleteMessage({ chat_id: chatId, message_id: msgId });
+      } catch {
+        try {
+          await api.editMessageReplyMarkup({ chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [] } });
+        } catch { /* сообщение могло уже измениться/исчезнуть */ }
+      }
+    }
+    return;
+  }
 
   if (data === 'help') {
     if (isEditable) {
