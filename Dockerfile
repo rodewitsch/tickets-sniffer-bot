@@ -15,6 +15,10 @@ FROM node:22-alpine
 ENV NODE_ENV=production
 WORKDIR /app
 
+# tzdata: чтобы TZ=Europe/Minsk (docker-compose) влиял на new Date().getHours()
+# и другие «локальные» методы даты (Alpine не ставит tzdata по умолчанию).
+RUN apk add --no-cache tzdata
+
 # node_modules из build-стадии
 COPY --from=build /app/node_modules ./node_modules
 

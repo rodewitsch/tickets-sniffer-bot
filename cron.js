@@ -13,9 +13,12 @@ const DAY_END = 21;                      // конец «дня», час (не 
 const DAY_MIN = 15, DAY_MAX = 30;        // границы интервала днём (минуты)
 const NIGHT_MIN = 60, NIGHT_MAX = 120;   // границы интервала ночью (минуты)
 
-// Случайная задержка до следующего цикла в зависимости от текущего локального часа.
+// Случайная задержка до следующего цикла в зависимости от текущего часа Минска.
+// Используем minskParts().hour (Intl, TZ-aware), а не new Date().getHours():
+// в node:22-alpine без tzdata getHours() вернул бы UTC, и дневной интервал
+// 15–30 мин превратился бы в ночной 60–120 мин.
 function nextDelayMinutes() {
-  const h = new Date().getHours();
+  const h = minskParts().hour;
   const isDay = h >= DAY_START && h < DAY_END;
   const [lo, hi] = isDay ? [DAY_MIN, DAY_MAX] : [NIGHT_MIN, NIGHT_MAX];
   return Math.round(lo + Math.random() * (hi - lo));
