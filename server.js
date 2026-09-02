@@ -14,7 +14,7 @@ import { PORT, CHECK_SECRET } from './env.js';
 import { runCheck } from './lib/checker.js';
 import { runMigrations } from './migrate.js';
 import { fetchEventCities, AFISHA_HOSTS } from './lib/sources/afisha.js';
-import { searchTicketpro, searchTicketproVenues } from './lib/sources/ticketpro.js';
+import { searchTicketpro, searchTicketproVenues, enrichTicketproCategories } from './lib/sources/ticketpro.js';
 import { searchBezkassira, fetchBezkassiraOrganizer } from './lib/sources/bezkassira.js';
 import { cityLabel } from './lib/cities.js';
 
@@ -159,14 +159,18 @@ async function handleTicketproSearch(req, res, url) {
   const q = (url.searchParams.get('q') || '').trim().slice(0, 120);
   if (!q) return sendHeaders(res, corsHeaders(req), 400, { ok: false, error: 'bad_query' });
   try {
-    const [events, venues] = await Promise.all([
+    const [searchEvents, venues] = await Promise.all([
       searchTicketpro(q),
       searchTicketproVenues(q),
     ]);
+    // Категория (кино/театр/концерт/…) в карточках Ticketpro не выводится — её
+    // читаем из хлебных крошек страницы события (как тип у bycard).
+    const events = await enrichTicketproCategories(searchEvents);
     sendHeaders(res, corsHeaders(req), 200, {
       ok: true,
       events: events.slice(0, 20).map((e) => ({
         uid: e.uid, title: e.title, url: e.url, image: e.image,
+        category: e.category || null,
         city: e.city, venue: e.venue, dateText: e.dateText,
         priceFrom: e.priceFrom, priceTo: e.priceTo, currency: e.currency,
         onSale: e.onSale, status: e.status,

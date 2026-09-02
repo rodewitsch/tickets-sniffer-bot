@@ -495,10 +495,13 @@
     }
     let html = '';
     events.slice(0, 20).forEach(function (e) {
-      const meta = [e.venue, e.city].filter(Boolean).join(', ');
+      // Тип события (кино/театр/концерт/…) показываем первым, как у bycard.
       const metaParts = [];
-      if (meta) metaParts.push(meta);
+      if (e.category) metaParts.push(e.category);
+      const venueCity = [e.venue, e.city].filter(Boolean).join(', ');
+      if (venueCity) metaParts.push(venueCity);
       if (e.dateText) metaParts.push(e.dateText);
+      const meta = metaParts.join(' · ');
       let price = '';
       if (e.priceFrom) {
         price = e.priceTo && e.priceTo !== e.priceFrom
