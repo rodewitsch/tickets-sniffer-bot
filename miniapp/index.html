@@ -2,8 +2,12 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Билетный радар</title>
+<!-- user-scalable=no уместен для Mini App в WebView, но мешает лендингу
+     в обычном браузере. Разрешаем масштаб: в полноценном Web App Telegram
+     это не даёт навредить, а рекламный лендинг становится зуммируемым. -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Билетный радар — следим за билетами за тебя</title>
+<meta name="description" content="Билетный радар — Telegram-бот, который следит за 24afisha.by, Ticketpro.by и BezKassira.by и напишет первым, как только появятся билеты на твоё событие.">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
   :root {
@@ -193,10 +197,452 @@
     margin: 24px auto; display: block;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ==================================================================
+     РЕКЛАМНЫЙ ЛЕНДИНГ — показывается, только когда Mini App открыт
+     в обычном браузере (не внутри Telegram). Рабочий интерфейс (#app)
+     при этом скрывается. Стили полностью автономны: не зависят от
+     --tg-theme-* (в браузере их нет) и поддерживают тёмную тему.
+     ================================================================== */
+  #landing { display: none; }
+
+  /* Лендинг живёт в обычном браузере, где нет WebView-ограничений. База Mini App
+     задаёт html,body{height:100%} + body{padding-bottom:92px} (под фиксированный
+     footer) — это ломает прокрутку длинного лендинга: body жёстко привязан к
+     высоте экрана, содержимое обрезается и секции «наезжают» друг на друга.
+     В landing-mode сбрасываем эти ограничения и даём контенту течь свободно. */
+  html.landing-mode { height: auto; }
+  body.landing-mode {
+    height: auto;
+    min-height: 100%;
+    padding-bottom: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+  body.landing-mode #app { display: none !important; }
+  body.landing-mode #landing { display: block; }
+
+  /* Цвета лендинга: светлая тема + авто-фолбэк тёмной */
+  :root, .landing-theme {
+    --l-bg: #f6f8fb;
+    --l-text: #101828;
+    --l-muted: #475467;
+    --l-card: #ffffff;
+    --l-border: #e4e7ec;
+    --l-accent: #2481cc;
+    --l-accent-2: #0d5fa8;
+    --l-cta-text: #ffffff;
+    --l-badge: #eaf3fb;
+  }
+  @media (prefers-color-scheme: dark) {
+    #landing {
+      --l-bg: #0b1220;
+      --l-text: #e9edf5;
+      --l-muted: #9aa6b8;
+      --l-card: #151e2e;
+      --l-border: #263349;
+      --l-accent: #3b9be8;
+      --l-accent-2: #69b6f2;
+      --l-cta-text: #0b1220;
+      --l-badge: rgba(59, 155, 232, 0.16);
+    }
+  }
+
+  /* Чтобы Meta/браузер не применяли safe-area отступы к лендингу — они
+     нулевые в обычном браузере, а в WebApp лендинг не показывается. */
+
+  #landing {
+    color: var(--l-text);
+    background: var(--l-bg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  #landing .wrap {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 0 20px;
+  }
+  #landing a { color: var(--l-accent); }
+
+  /* Глобальные правила Mini App (header{position:sticky…}, header h1, main{padding…})
+     применяются ко ВСЕМ элементам — в т.ч. к семантическим <header>/<h1> лендинга.
+     Это заставляло герой-<header class="l-hero"> «прилипать» к верху экрана, и при
+     прокрутке следующие секции наползали на него (тексты перекрывались).
+     Ниже сбрасываем «хром» Mini App внутри лендинга, чтобы он был автономным. */
+  #landing header,
+  #landing .l-hero {
+    position: static;
+    z-index: auto;
+    background: none;
+    border: none;
+    padding: 0;
+    box-shadow: none;
+  }
+  /* Сброс «хрома» Mini App из header h1 (flex/центровка/клир цвета) — но НЕ трогаем
+     размер/вес: их задаёт отдельное правило #landing h1 ниже (clamp/font-weight:800).
+     font-size/weight убрали — иначе они перебили бы крупный заголовок героя. */
+  #landing header h1 {
+    display: block;
+    align-items: initial;
+    gap: initial;
+    color: inherit;
+  }
+  #landing main { padding: 0; }
+  #landing h1, #landing h2, #landing h3 { margin: 0; }
+
+  /* Хедер лендинга */
+  #landing .l-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 18px 20px;
+    max-width: 1000px;
+    margin: 0 auto;
+  }
+  #landing .l-brand {
+    font-size: 20px;
+    font-weight: 800;
+    letter-spacing: -0.2px;
+    color: var(--l-text);
+  }
+  #landing .l-nav .l-cta-sm {
+    display: inline-block;
+    background: var(--l-accent);
+    color: var(--l-cta-text);
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 14px;
+    padding: 9px 16px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  @media (prefers-color-scheme: dark) {
+    #landing .l-nav .l-cta-sm { color: #0b1220; }
+  }
+
+  /* Герой-блок */
+  #landing .l-hero {
+    text-align: center;
+    padding: 56px 20px 40px;
+    background:
+      radial-gradient(900px 380px at 15% -80px, rgba(36,129,204,0.14), transparent),
+      radial-gradient(800px 360px at 90% 10%, rgba(36,129,204,0.10), transparent);
+  }
+  #landing .l-eyebrow {
+    display: inline-block;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: .5px;
+    text-transform: uppercase;
+    color: var(--l-accent);
+    background: var(--l-badge);
+    padding: 6px 14px;
+    border-radius: 999px;
+    margin-bottom: 18px;
+  }
+  #landing h1 {
+    font-size: clamp(30px, 5vw, 52px);
+    letter-spacing: -1px;
+    line-height: 1.12;
+    margin: 0 0 18px;
+    font-weight: 800;
+  }
+  #landing .l-hero p {
+    font-size: clamp(16px, 2vw, 19px);
+    color: var(--l-muted);
+    max-width: 640px;
+    margin: 0 auto 30px;
+  }
+  #landing .l-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    background: var(--l-accent);
+    color: var(--l-cta-text);
+    border-radius: 999px;
+    font-size: 17px;
+    font-weight: 700;
+    text-decoration: none;
+    padding: 15px 30px;
+    box-shadow: 0 10px 24px -10px rgba(36,129,204,0.6);
+    transition: transform .12s ease, background .12s ease;
+  }
+  #landing .l-btn:hover { background: var(--l-accent-2); transform: translateY(-1px); }
+  @media (prefers-color-scheme: dark) {
+    #landing .l-btn { color: #0b1220; box-shadow: 0 10px 26px -12px rgba(59,155,232,0.5); }
+  }
+  #landing .l-hero .l-share {
+    margin-top: 14px;
+    font-size: 13.5px;
+    color: var(--l-muted);
+  }
+  #landing .l-hero .l-share code {
+    background: var(--l-badge);
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  /* Секции */
+  #landing section.l-sec { padding: 48px 20px; }
+  #landing .l-sec h2 {
+    font-size: clamp(22px, 3.2vw, 30px);
+    letter-spacing: -0.5px;
+    margin: 0 0 26px;
+    text-align: center;
+    font-weight: 800;
+  }
+  #landing .l-alt { background: var(--l-card); border-top: 1px solid var(--l-border); }
+
+  /* Преимущества */
+  #landing .l-feats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 18px;
+  }
+  #landing .l-feat {
+    background: var(--l-card);
+    border: 1px solid var(--l-border);
+    border-radius: 16px;
+    padding: 22px 18px;
+    text-align: center;
+  }
+  #landing .l-feat .ico { font-size: 30px; line-height: 1; }
+  #landing .l-feat h3 { font-size: 17px; margin: 12px 0 6px; }
+  #landing .l-feat p { color: var(--l-muted); font-size: 14.5px; margin: 0; }
+
+  /* Как это работает */
+  #landing .l-steps {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 18px;
+    counter-reset: step;
+  }
+  #landing .l-step {
+    background: var(--l-card);
+    border: 1px solid var(--l-border);
+    border-radius: 16px;
+    padding: 20px 18px;
+    position: relative;
+    text-align: center;
+  }
+  #landing .l-step .num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    background: var(--l-accent);
+    color: var(--l-cta-text);
+    font-weight: 800;
+    margin: 0 auto 12px;
+  }
+  @media (prefers-color-scheme: dark) {
+    #landing .l-step .num { color: #0b1220; }
+  }
+  #landing .l-step h3 { font-size: 16px; margin: 0 0 6px; }
+  #landing .l-step p { color: var(--l-muted); font-size: 14px; margin: 0; }
+
+  /* Источники / финиш-CTA */
+  #landing .l-srcs {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 12px;
+    margin-bottom: 30px;
+  }
+  #landing .l-src {
+    background: var(--l-card);
+    border: 1px solid var(--l-border);
+    border-radius: 999px;
+    padding: 10px 18px;
+    font-weight: 600;
+    font-size: 14.5px;
+  }
+  #landing .l-final { text-align: center; }
+  #landing .l-final p {
+    color: var(--l-muted);
+    max-width: 560px;
+    margin: 0 auto 26px;
+  }
+
+  /* Поддержать проект */
+  #landing .l-support {
+    padding: 60px 20px;
+  }
+  #landing .l-support .l-support-card {
+    max-width: 640px;
+    margin: 0 auto;
+    background: var(--l-card);
+    border: 1px solid var(--l-border);
+    border-radius: 20px;
+    padding: 44px 28px;
+    text-align: center;
+    box-shadow: 0 12px 30px -18px rgba(20, 30, 60, 0.35);
+  }
+  #landing .l-support .l-support-card h2 {
+    font-size: clamp(22px, 3vw, 28px);
+    margin: 0 0 16px;
+    font-weight: 800;
+    text-align: center;
+  }
+  #landing .l-support .l-support-card > p {
+    color: var(--l-muted);
+    font-size: 15.5px;
+    max-width: 480px;
+    margin: 0 auto 26px;
+  }
+  #landing .l-support .l-btn { margin: 0; }
+
+  #landing .l-foot {
+    text-align: center;
+    padding: 34px 20px;
+    color: var(--l-muted);
+    font-size: 13px;
+    border-top: 1px solid var(--l-border);
+  }
 </style>
 </head>
 <body>
 
+<!-- ================================================================
+     РЕКЛАМНЫЙ ЛЕНДИНГ (обычный браузер, вне Telegram).
+     Внутри Telegram не виден: скрипт внизу показывает его, только когда
+     isWebApp === false, одновременно пряча рабочий #app.
+     ================================================================ -->
+<div id="landing">
+  <div class="l-nav wrap">
+    <div class="l-brand">🎫 Билетный радар</div>
+    <a class="l-cta-sm" href="https://t.me/tickets_sniffer_bot" rel="noopener" target="_blank">Открыть в Telegram</a>
+  </div>
+
+  <header class="l-hero">
+    <div class="wrap">
+      <span class="l-eyebrow">Telegram-бот · Беларусь</span>
+      <h1>Билеты на любимого артиста<br>появляются — мы пишем первыми</h1>
+      <p>
+        Добавь событие, площадку или ключевое слово — и когда продажи откроются,
+        «Билетный радар» пришлёт тебе уведомление со ссылкой на покупку.
+        Никакого ручного обновления страниц и охоты за анонсами.
+      </p>
+      <a class="l-btn" href="https://t.me/tickets_sniffer_bot" rel="noopener" target="_blank">
+        💬 Открыть бота в Telegram
+      </a>
+      <div class="l-share">
+        Или напиши боту напрямую: <code>@tickets_sniffer_bot</code>
+      </div>
+    </div>
+  </header>
+
+  <section class="l-sec">
+    <div class="wrap">
+      <h2>Зачем он нужен</h2>
+      <div class="l-feats">
+        <div class="l-feat">
+          <div class="ico">⚡</div>
+          <h3>Реакция за секунды</h3>
+          <p>Уведомление приходит сразу после старта продаж — ты успеваешь раньше толпы.</p>
+        </div>
+        <div class="l-feat">
+          <div class="ico">🎯</div>
+          <h3>Следи за чем хочешь</h3>
+          <p>Событие, любимая площадка или просто имя артиста как ключевое слово.</p>
+        </div>
+        <div class="l-feat">
+          <div class="ico">🏙️</div>
+          <h3>По городам</h3>
+          <p>Минск, Брест, Гомель, Гродно и другие — следи отдельно по каждому городу.</p>
+        </div>
+        <div class="l-feat">
+          <div class="ico">🔗</div>
+          <h3>Ссылка на покупку</h3>
+          <p>В уведомлении сразу ссылка на билеты — ничего искать не нужно.</p>
+        </div>
+        <div class="l-feat">
+          <div class="ico">🌐</div>
+          <h3>Все площадки сразу</h3>
+          <p>24afisha.by, bycard.by, Ticketpro.by и BezKassira.by — один бот следит за всеми.</p>
+        </div>
+        <div class="l-feat">
+          <div class="ico">🤖</div>
+          <h3>Работает в Telegram</h3>
+          <p>Ничего устанавливать не нужно — бот проверяет и пишет прямо в твой чат.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="l-sec l-alt">
+    <div class="wrap">
+      <h2>Как это работает</h2>
+      <div class="l-steps">
+        <div class="l-step">
+          <span class="num">1</span>
+          <h3>Открой бота</h3>
+          <p>Нажми кнопку выше или найди @tickets_sniffer_bot в Telegram.</p>
+        </div>
+        <div class="l-step">
+          <span class="num">2</span>
+          <h3>Добавь, что следить</h3>
+          <p>Одно событие, площадка или ключевое слово по всем площадкам.</p>
+        </div>
+        <div class="l-step">
+          <span class="num">3</span>
+          <h3>Жди уведомление</h3>
+          <p>Как только появятся билеты, бот напишет со ссылкой на покупку.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="l-sec l-final">
+    <div class="wrap">
+      <h2>Билеты уже проверяют за тебя</h2>
+      <div class="l-srcs">
+        <span class="l-src">🎭 24afisha.by</span>
+        <span class="l-src">🎟️ bycard.by</span>
+        <span class="l-src">🎫 Ticketpro.by</span>
+        <span class="l-src">🎬 BezKassira.by</span>
+      </div>
+      <p>
+        Регистрация не нужна. Всё работает прямо в Telegram: добавь событие —
+        и просто жди, когда продажи откроются.
+      </p>
+      <a class="l-btn" href="https://t.me/tickets_sniffer_bot" rel="noopener" target="_blank">
+        💬 Открыть бота в Telegram
+      </a>
+    </div>
+  </section>
+
+  <!-- Поддержать проект -->
+  <section class="l-sec l-support">
+    <div class="wrap">
+      <div class="l-support-card">
+        <h2>Поддержать проект</h2>
+        <p>
+          Буду рад вашей поддержке. Каждое пожертвование идёт на развитие проектов
+          и поддержание инфраструктуры 💙
+        </p>
+        <a class="l-btn" href="https://boosty.to/rodevich/donate" rel="noopener" target="_blank">
+          🤝 Поддержать
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <footer class="l-foot">
+    🎫 Билетный радар — независимый наблюдатель за кассами. Не является кассой и не продаёт билеты.
+  </footer>
+</div>
+
+<!-- ================================================================
+     РАБОЧИЙ MINI APP (открывается из Telegram через
+     KeyboardButton.web_app «🔍 Найти и следить» или Menu Button).
+     ================================================================ -->
+<div id="app">
 <header>
   <h1>🎫 Билетный радар</h1>
   <div class="sub">24afisha.by · bycard.by · ticketpro.by · bezkassira.by</div>
@@ -250,13 +696,30 @@
     <button class="cancel" id="city-cancel">Отмена</button>
   </div>
 </div>
+</div><!-- /#app -->
 
 <script>
 (function () {
   const tg = window.Telegram && window.Telegram.WebApp;
   // Для Mini Apps, запущенных через KeyboardButton.web_app, initData пуст (так задумано
-  // Telegram), но tg.platform заполнен. Поэтому детектируем живой клиент по tg.platform.
-  const isWebApp = !!(tg && tg.platform && typeof tg.sendData === 'function');
+  // Telegram), но tg.platform заполнен реальным значением. Поэтому детектируем живой
+  // клиент по tg.platform, а не по initData.
+  //
+  // Важно: официальный telegram-web-app.js вне Telegram (обычный браузер) подставляет
+  // «standalone»-заглушку: platform='unknown' и полноценные sendData/HapticFeedback и т.п.
+  // Значит «platform заполнен» сам по себе НЕ значит «мы внутри Telegram». Настоящий
+  // клиент всегда отдаёт конкретную платформу из списка ниже и никогда 'unknown'.
+  // Проверяем по белому списку известных платформ, чтобы в браузере показать
+  // рекламный лендинг, а не «сломанный» рабочий UI (слежение требует sendData в чат).
+  const REAL_PLATFORMS = [
+    'android', 'android_x',        // мобильные
+    'ios', 'ipad',                 // мобильные Apple
+    'macos', 'windows', 'linux',   // десктопные
+    'ubuntu', 'chromeos', 'tdesktop',
+    'web', 'weba', 'webb', 'webk', // браузерные клиенты Telegram
+  ];
+  const isWebApp = !!(tg && tg.platform && typeof tg.sendData === 'function' &&
+    REAL_PLATFORMS.indexOf(tg.platform) !== -1);
   function webappDiag() {
     if (!tg) return 'нет WebApp API';
     return 'platform=' + (tg.platform || '?') +
@@ -266,6 +729,19 @@
   }
   console.log('[webapp] diag:', webappDiag());
   if (tg) { try { tg.ready(); if (isWebApp) tg.expand(); } catch (e) {} }
+
+  // ---------------------------------------------------------------
+  // Ветвление по контексту открытия:
+  //   • внутри Telegram (Mini App)  → isWebApp === true  → рабочий UI ниже;
+  //   • в обычном браузере          → isWebApp === false → рекламный лендинг,
+  //     а рабочий #app не монтируем (позиции слежения требуют sendData в чат).
+  // ---------------------------------------------------------------
+  if (!isWebApp) {
+    console.log('[webapp] не WebApp-сеанс — показываю рекламный лендинг');
+    document.documentElement.classList.add('landing-mode');
+    document.body.classList.add('landing-mode');
+    return; // не запускаем рабочий Mini App в браузере
+  }
 
   const KIND = { query: 'ключевое слово', event: 'событие', venue: 'площадка' };
   const SRC = { all: 'все источники', afisha: 'Афиша', ticketpro: 'Ticketpro', bezkassira: 'BezKassira' };
