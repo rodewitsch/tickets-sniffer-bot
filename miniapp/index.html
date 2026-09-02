@@ -413,14 +413,17 @@
     $('wl-count').textContent = watchlist.length ? '(' + watchlist.length + ')' : '';
     $('wl-empty').classList.toggle('hidden', watchlist.length > 0);
     $('wl-items').innerHTML = watchlist.map(function (i) {
+      // Для события с известной категорией (кино/театр/концерт/…) показываем её
+      // вместо обобщённого «событие», чтобы было видно, что это за событие.
+      const kindLabel = (i.k === 'event' && i.g) ? i.g : (KIND[i.k] || i.k);
       const cityPart = i.c ? ' · ' + esc(cityLabelStatic(i.c)) : '';
       return '<div class="watch-item" data-id="' + i.i + '">' +
-        '<div class="t">' +
-          '<div class="name">' + esc(i.t) + '</div>' +
-          '<div class="meta">' + esc(KIND[i.k] || i.k) + ' · ' + esc(SRC[i.s] || i.s) + cityPart + '</div>' +
-        '</div>' +
-        '<button class="btn del" data-del="' + i.i + '">❌</button>' +
-      '</div>';
+          '<div class="t">' +
+            '<div class="name">' + esc(i.t) + '</div>' +
+            '<div class="meta">' + esc(kindLabel) + ' · ' + esc(SRC[i.s] || i.s) + cityPart + '</div>' +
+          '</div>' +
+          '<button class="btn del" data-del="' + i.i + '">❌</button>' +
+        '</div>';
     }).join('');
   }
 
@@ -516,7 +519,7 @@
           '<div class="meta">' + esc(metaParts.join(' · ') || 'Событие') + '</div>' +
           (price ? '<div class="meta">💰 ' + esc(price) + '</div>' : '') +
           '<div class="actions">' +
-            '<button class="btn" data-add-event="1" data-title="' + esc(e.title) + '" data-url="' + esc(e.url) + '" data-src="ticketpro">Следить</button>' +
+            '<button class="btn" data-add-event="1" data-title="' + esc(e.title) + '" data-url="' + esc(e.url) + '" data-src="ticketpro" data-cat="' + esc(e.category || '') + '">Следить</button>' +
             '<a class="btn ghost" href="' + esc(e.url) + '" target="_blank" rel="noopener">Открыть</a>' +
           '</div>' +
         '</div></div>';
@@ -572,7 +575,7 @@
           '<div class="title">' + esc(e.title) + '</div>' +
           '<div class="meta">' + (esc(meta) || 'Событие') + '</div>' +
           '<div class="actions">' +
-            '<button class="btn" data-add-event="1" data-title="' + esc(e.title) + '" data-url="' + esc(e.url) + '" data-src="bezkassira">Следить</button>' +
+            '<button class="btn" data-add-event="1" data-title="' + esc(e.title) + '" data-url="' + esc(e.url) + '" data-src="bezkassira" data-cat="' + esc(e.category || '') + '">Следить</button>' +
             '<button class="btn ghost" data-add-org="1" data-title="' + esc(e.title) + '" data-url="' + esc(e.url) + '">Организатор</button>' +
             '<a class="btn ghost" href="' + esc(e.url) + '" target="_blank" rel="noopener">Открыть</a>' +
           '</div>' +
@@ -614,7 +617,7 @@
           '<div class="title">' + esc(p.name) + '</div>' +
           '<div class="meta">' + esc(type || 'Событие') + ' · Афиша / ByCard</div>' +
           '<div class="actions">' +
-            '<button class="btn" data-add-event="' + esc(p.slug) + '" data-title="' + esc(p.name) + '" data-url="' + esc(evUrl) + '">Следить</button>' +
+            '<button class="btn" data-add-event="' + esc(p.slug) + '" data-title="' + esc(p.name) + '" data-url="' + esc(evUrl) + '" data-cat="' + esc(type || '') + '">Следить</button>' +
             '<a class="btn ghost" href="' + esc(evUrl) + '" target="_blank" rel="noopener">Открыть</a>' +
           '</div>' +
         '</div></div>';
@@ -641,17 +644,18 @@
       const title = evBtn.dataset.title;
       const url = evBtn.dataset.url;
       const src = evBtn.dataset.src || 'afisha';
+      const cat = evBtn.dataset.cat || '';
       if (evBtn.classList.contains('done')) return;
       if (src === 'ticketpro') {
         evBtn.classList.add('done'); evBtn.textContent = '✓ Слежу';
-        const ok = send({ a: 'add', k: 'event', s: 'ticketpro', q: title, u: url, t: title });
+        const ok = send({ a: 'add', k: 'event', s: 'ticketpro', q: title, u: url, t: title, g: cat });
         haptic('medium');
         if (ok) toast('Добавлено! Бот подтвердит в чате');
         return;
       }
       if (src === 'bezkassira') {
         evBtn.classList.add('done'); evBtn.textContent = '✓ Слежу';
-        const ok = send({ a: 'add', k: 'event', s: 'bezkassira', q: title, u: url, t: title });
+        const ok = send({ a: 'add', k: 'event', s: 'bezkassira', q: title, u: url, t: title, g: cat });
         haptic('medium');
         if (ok) toast('Добавлено! Бот подтвердит в чате');
         return;
@@ -665,13 +669,13 @@
           openCityModal('Выберите город', 'Где следить за билетами на «' + title + '»?', cities, function (city) {
             const c = city == null ? 'all' : city;
             const cityMeta = city == null ? ' (все города)' : (city === 'all' ? ' (все города)' : ' (' + cityLabelStatic(city) + ')');
-            send({ a: 'add', k: 'event', s: 'afisha', q: title, u: url, t: title + cityMeta, c: c });
+            send({ a: 'add', k: 'event', s: 'afisha', q: title, u: url, t: title + cityMeta, c: c, g: cat });
             haptic('medium');
             toast('Добавлено! Бот подтвердит в чате');
           });
         } else {
           evBtn.textContent = '✓ Слежу';
-          const ok = send({ a: 'add', k: 'event', s: 'afisha', q: title, u: url, t: title });
+          const ok = send({ a: 'add', k: 'event', s: 'afisha', q: title, u: url, t: title, g: cat });
           haptic('medium');
           if (ok) toast('Добавлено! Бот подтвердит в чате');
         }
