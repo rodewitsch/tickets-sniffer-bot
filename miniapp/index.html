@@ -130,6 +130,7 @@
   .watch-item .t { flex: 1; min-width: 0; }
   .watch-item .t .name { font-weight: 650; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; }
   .watch-item .t .meta { color: var(--hint); font-size: 12.5px; margin-top: 2px; }
+  .watch-item .actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
 
   .toast {
     position: fixed; left: 50%; transform: translateX(-50%);
@@ -905,14 +906,18 @@
         ? '<img class="thumb" src="' + esc(i.m) + '" alt="" loading="lazy">'
         : (i.k === 'event' ? '<div class="thumb placeholder">🎫</div>'
           : (i.k === 'venue' ? '<div class="thumb placeholder">🏟</div>' : ''));
+      // Кнопки «Открыть»/«Удалить» кладём под текст/почерк (как кнопки действия
+      // .actions в карточках поиска), а не в один ряд справа от названия.
       return '<div class="watch-item" data-id="' + i.i + '">' +
           thumb +
           '<div class="t">' +
             '<div class="name">' + esc(i.t) + '</div>' +
             '<div class="meta">' + esc(kindLabel) + ' · ' + esc(SRC[i.s] || i.s) + cityPart + '</div>' +
+            '<div class="actions">' +
+              openBtn +
+              '<button class="btn del" data-del="' + i.i + '">Удалить</button>' +
+            '</div>' +
           '</div>' +
-          openBtn +
-          '<button class="btn del" data-del="' + i.i + '">❌</button>' +
         '</div>';
     }).join('');
   }
