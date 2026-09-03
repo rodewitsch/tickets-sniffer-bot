@@ -902,10 +902,13 @@
         ? '<a class="btn ghost" href="' + esc(i.u) + '" target="_blank" rel="noopener">Открыть</a>'
         : '';
       // Постер события/площадки (i.m приходит из снапшота), как в карточке поиска.
+      // У события/площадки есть реальное превью либо плейсхолдер; у ключевого
+      // слова своего постера нет (i.m для query всегда null) — показываем заглушку.
       const thumb = i.m
         ? '<img class="thumb" src="' + esc(i.m) + '" alt="" loading="lazy">'
         : (i.k === 'event' ? '<div class="thumb placeholder">🎫</div>'
-          : (i.k === 'venue' ? '<div class="thumb placeholder">🏟</div>' : ''));
+          : (i.k === 'venue' ? '<div class="thumb placeholder">🏟</div>'
+            : '<div class="thumb placeholder">🔍</div>'));
       // Кнопки «Открыть»/«Удалить» кладём под текст/почерк (как кнопки действия
       // .actions в карточках поиска), а не в один ряд справа от названия.
       return '<div class="watch-item" data-id="' + i.i + '">' +
