@@ -893,11 +893,17 @@
       // вместо обобщённого «событие», чтобы было видно, что это за событие.
       const kindLabel = (i.k === 'event' && i.g) ? i.g : (KIND[i.k] || i.k);
       const cityPart = i.c ? ' · ' + esc(cityLabelStatic(i.c)) : '';
+      // Кнопка «Открыть страницу» — только когда отслеживается конкретное
+      // событие/площадка и у него есть URL страницы (i.u приходит из снапшота).
+      const openBtn = (i.k === 'event' || i.k === 'venue') && i.u
+        ? '<a class="btn ghost" href="' + esc(i.u) + '" target="_blank" rel="noopener">Открыть</a>'
+        : '';
       return '<div class="watch-item" data-id="' + i.i + '">' +
           '<div class="t">' +
             '<div class="name">' + esc(i.t) + '</div>' +
             '<div class="meta">' + esc(kindLabel) + ' · ' + esc(SRC[i.s] || i.s) + cityPart + '</div>' +
           '</div>' +
+          openBtn +
           '<button class="btn del" data-del="' + i.i + '">❌</button>' +
         '</div>';
     }).join('');
