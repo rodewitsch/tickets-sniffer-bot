@@ -19,6 +19,9 @@ export const users = sqliteTable('users', {
 //         NULL — город не выбран (по умолчанию город события из его URL).
 // category: тип/категория события (кино/театр/концерт/…), если известна на момент
 //         добавления (для kind='event'). Хранится для показа в списке отслеживания.
+// image:   URL постера события/площадки (для kind='event'/'venue'), если известен на
+//         момент добавления из мини-приложения. Хранится для показа в списке
+//         отслеживания (аналог карточки поиска).
 export const watchItems = sqliteTable(
   'watch_items',
   {
@@ -31,6 +34,7 @@ export const watchItems = sqliteTable(
     title: text('title'),
     city: text('city'),
     category: text('category'),
+    image: text('image'),
     active: integer('active', { mode: 'boolean' }).default(true),
     createdAt: integer('created_at').default(sql`(unixepoch())`),
   },

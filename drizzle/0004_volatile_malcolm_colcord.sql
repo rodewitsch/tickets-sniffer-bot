@@ -1,0 +1,1 @@
+ALTER TABLE `watch_items` ADD `image` text;

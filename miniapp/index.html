@@ -95,14 +95,16 @@
     margin-top: 12px;
     align-items: center;
   }
-  .card .thumb {
+  .card .thumb,
+  .watch-item .thumb {
     width: 64px; height: 90px;
     border-radius: 10px;
     object-fit: cover;
     background: var(--bg2);
     flex-shrink: 0;
   }
-  .card .thumb.placeholder { display:flex; align-items:center; justify-content:center; font-size: 28px; }
+  .card .thumb.placeholder,
+  .watch-item .thumb.placeholder { display:flex; align-items:center; justify-content:center; font-size: 28px; }
   .card .info { flex: 1; min-width: 0; }
   .card .title { font-weight: 650; font-size: 14.5px; line-height: 1.3; }
   .card .meta { color: var(--hint); font-size: 12.5px; margin-top: 3px; line-height: 1.35; }
@@ -898,7 +900,13 @@
       const openBtn = (i.k === 'event' || i.k === 'venue') && i.u
         ? '<a class="btn ghost" href="' + esc(i.u) + '" target="_blank" rel="noopener">Открыть</a>'
         : '';
+      // Постер события/площадки (i.m приходит из снапшота), как в карточке поиска.
+      const thumb = i.m
+        ? '<img class="thumb" src="' + esc(i.m) + '" alt="" loading="lazy">'
+        : (i.k === 'event' ? '<div class="thumb placeholder">🎫</div>'
+          : (i.k === 'venue' ? '<div class="thumb placeholder">🏟</div>' : ''));
       return '<div class="watch-item" data-id="' + i.i + '">' +
+          thumb +
           '<div class="t">' +
             '<div class="name">' + esc(i.t) + '</div>' +
             '<div class="meta">' + esc(kindLabel) + ' · ' + esc(SRC[i.s] || i.s) + cityPart + '</div>' +
@@ -957,6 +965,34 @@
     };
   });
 
+  // ---------- единая карточка события ----------
+  // Рисует карточку события одинаково для всех источников. Дата и цена выводятся
+  // в одних и тех же местах, когда источник их даёт (поля dateText/priceFrom/…);
+  // где данных нет (например, цена события у Афиши недоступна) — строки просто не
+  // появляются. actionsHtml — кнопки, уникальные для источника.
+  function eventCardHtml(e) {
+    const metaParts = [];
+    if (e.category) metaParts.push(e.category);
+    const venueCity = [e.venue, e.city].filter(Boolean).join(', ');
+    if (venueCity) metaParts.push(venueCity);
+    if (e.dateText) metaParts.push(e.dateText);
+    let price = '';
+    if (e.priceFrom) {
+      price = e.priceTo && e.priceTo !== e.priceFrom
+        ? 'от ' + e.priceFrom + ' до ' + e.priceTo + ' ' + (e.currency || 'BYN')
+        : 'от ' + e.priceFrom + ' ' + (e.currency || 'BYN');
+    }
+    return '<div class="card">' +
+      (e.image ? '<img class="thumb" src="' + esc(e.image) + '" alt="" loading="lazy">'
+               : '<div class="thumb placeholder">🎫</div>') +
+      '<div class="info">' +
+        '<div class="title">' + esc(e.title) + '</div>' +
+        '<div class="meta">' + esc(metaParts.join(' · ') || 'Событие') + '</div>' +
+        (price ? '<div class="meta">💰 ' + esc(price) + '</div>' : '') +
+        '<div class="actions">' + e.actionsHtml + '</div>' +
+      '</div></div>';
+  }
+
   // ---------- поиск по Ticketpro (через эндпоинт бота, обходит CORS) ----------
   async function runTicketproSearch(q) {
     if (!BOT_API) {
@@ -980,31 +1016,16 @@
     }
     let html = '';
     events.slice(0, 20).forEach(function (e) {
-      // Тип события (кино/театр/концерт/…) показываем первым, как у bycard.
-      const metaParts = [];
-      if (e.category) metaParts.push(e.category);
-      const venueCity = [e.venue, e.city].filter(Boolean).join(', ');
-      if (venueCity) metaParts.push(venueCity);
-      if (e.dateText) metaParts.push(e.dateText);
-      const meta = metaParts.join(' · ');
-      let price = '';
-      if (e.priceFrom) {
-        price = e.priceTo && e.priceTo !== e.priceFrom
-          ? 'от ' + e.priceFrom + ' до ' + e.priceTo + ' ' + (e.currency || 'BYN')
-          : 'от ' + e.priceFrom + ' ' + (e.currency || 'BYN');
-      }
-      html += '<div class="card">' +
-        (e.image ? '<img class="thumb" src="' + esc(e.image) + '" alt="" loading="lazy">'
-                 : '<div class="thumb placeholder">🎫</div>') +
-        '<div class="info">' +
-          '<div class="title">' + esc(e.title) + '</div>' +
-          '<div class="meta">' + esc(metaParts.join(' · ') || 'Событие') + '</div>' +
-          (price ? '<div class="meta">💰 ' + esc(price) + '</div>' : '') +
-          '<div class="actions">' +
-            '<button class="btn" data-add-event="1" data-title="' + esc(e.title) + '" data-url="' + esc(e.url) + '" data-src="ticketpro" data-cat="' + esc(e.category || '') + '">Следить</button>' +
-            '<a class="btn ghost" href="' + esc(e.url) + '" target="_blank" rel="noopener">Открыть</a>' +
-          '</div>' +
-        '</div></div>';
+      const actions =
+        '<button class="btn" data-add-event="1" data-title="' + esc(e.title) + '" data-url="' + esc(e.url) + '" data-src="ticketpro" data-cat="' + esc(e.category || '') + '" data-img="' + esc(e.image || '') + '">Следить</button>' +
+        '<a class="btn ghost" href="' + esc(e.url) + '" target="_blank" rel="noopener">Открыть</a>';
+      html += eventCardHtml({
+        title: e.title, image: e.image, url: e.url,
+        category: e.category || null, venue: e.venue, city: e.city,
+        dateText: e.dateText || null,
+        priceFrom: e.priceFrom, priceTo: e.priceTo, currency: e.currency,
+        actionsHtml: actions,
+      });
     });
     venues.slice(0, 10).forEach(function (v) {
       html += '<div class="card">' +
@@ -1014,7 +1035,7 @@
           '<div class="title">' + esc(v.name) + '</div>' +
           '<div class="meta">Площадка · Ticketpro</div>' +
           '<div class="actions">' +
-            '<button class="btn" data-add-venue="1" data-title="' + esc(v.name) + '" data-url="' + esc(v.url) + '" data-src="ticketpro">Следить за площадкой</button>' +
+            '<button class="btn" data-add-venue="1" data-title="' + esc(v.name) + '" data-url="' + esc(v.url) + '" data-src="ticketpro" data-img="' + esc(v.image || '') + '">Следить за площадкой</button>' +
           '</div>' +
         '</div></div>';
     });
@@ -1043,25 +1064,17 @@
     }
     let html = '';
     events.slice(0, 20).forEach(function (e) {
-      // Тип события (кино/театр/концерт/…) показываем первым, как у bycard.
-      const metaParts = [];
-      if (e.category) metaParts.push(e.category);
-      const venueCity = [e.venue, e.city].filter(Boolean).join(', ');
-      if (venueCity) metaParts.push(venueCity);
-      metaParts.push('BezKassira');
-      const meta = metaParts.join(' · ');
-      html += '<div class="card">' +
-        (e.image ? '<img class="thumb" src="' + esc(e.image) + '" alt="" loading="lazy">'
-                 : '<div class="thumb placeholder">🎫</div>') +
-        '<div class="info">' +
-          '<div class="title">' + esc(e.title) + '</div>' +
-          '<div class="meta">' + (esc(meta) || 'Событие') + '</div>' +
-          '<div class="actions">' +
-            '<button class="btn" data-add-event="1" data-title="' + esc(e.title) + '" data-url="' + esc(e.url) + '" data-src="bezkassira" data-cat="' + esc(e.category || '') + '">Следить</button>' +
-            '<button class="btn ghost" data-add-org="1" data-title="' + esc(e.title) + '" data-url="' + esc(e.url) + '">Организатор</button>' +
-            '<a class="btn ghost" href="' + esc(e.url) + '" target="_blank" rel="noopener">Открыть</a>' +
-          '</div>' +
-        '</div></div>';
+      const actions =
+        '<button class="btn" data-add-event="1" data-title="' + esc(e.title) + '" data-url="' + esc(e.url) + '" data-src="bezkassira" data-cat="' + esc(e.category || '') + '" data-img="' + esc(e.image || '') + '">Следить</button>' +
+        '<button class="btn ghost" data-add-org="1" data-title="' + esc(e.title) + '" data-url="' + esc(e.url) + '">Организатор</button>' +
+        '<a class="btn ghost" href="' + esc(e.url) + '" target="_blank" rel="noopener">Открыть</a>';
+      html += eventCardHtml({
+        title: e.title, image: e.image, url: e.url,
+        category: e.category || null, venue: e.venue, city: e.city,
+        dateText: e.dateText || null,
+        priceFrom: e.priceFrom, priceTo: e.priceTo, currency: e.currency,
+        actionsHtml: actions,
+      });
     });
     $('results').innerHTML = html;
   }
@@ -1092,17 +1105,18 @@
       const img = p.image && (p.image['300x430'] || p.image['240x340'] || p.image.original);
       const evUrl = AFISHA_SITE + '/ru/minsk/event/' + p.slug;
       const type = p.types && p.types[0] && p.types[0].name;
-      html += '<div class="card">' +
-        (img ? '<img class="thumb" src="' + esc(img) + '" alt="" loading="lazy">'
-             : '<div class="thumb placeholder">🎭</div>') +
-        '<div class="info">' +
-          '<div class="title">' + esc(p.name) + '</div>' +
-          '<div class="meta">' + esc(type || 'Событие') + ' · Афиша / ByCard</div>' +
-          '<div class="actions">' +
-            '<button class="btn" data-add-event="' + esc(p.slug) + '" data-title="' + esc(p.name) + '" data-url="' + esc(evUrl) + '" data-cat="' + esc(type || '') + '">Следить</button>' +
-            '<a class="btn ghost" href="' + esc(evUrl) + '" target="_blank" rel="noopener">Открыть</a>' +
-          '</div>' +
-        '</div></div>';
+      // У Афиши/ByCard в выдаче поиска нет ни даты, ни цены (цена по событию
+      // доступна только через отдельный schedule API по id+городу, см. AGENTS.md) —
+      // поэтому карточка рисуется той же разметкой, но без строк даты и цены.
+      const actions =
+        '<button class="btn" data-add-event="' + esc(p.slug) + '" data-title="' + esc(p.name) + '" data-url="' + esc(evUrl) + '" data-cat="' + esc(type || '') + '" data-img="' + esc(img || '') + '">Следить</button>' +
+        '<a class="btn ghost" href="' + esc(evUrl) + '" target="_blank" rel="noopener">Открыть</a>';
+      html += eventCardHtml({
+        title: p.name, image: img, url: evUrl,
+        category: type || null, venue: null, city: null,
+        dateText: null, priceFrom: null, priceTo: null, currency: null,
+        actionsHtml: actions,
+      });
     });
     objects.slice(0, 10).forEach(function (o) {
       const venueUrl = AFISHA_SITE + '/ru/minsk/events/' + o.slug;
@@ -1127,17 +1141,20 @@
       const url = evBtn.dataset.url;
       const src = evBtn.dataset.src || 'afisha';
       const cat = evBtn.dataset.cat || '';
+      // Постер (превью) события из карточки поиска — сохраняем, чтобы показать его
+      // в списке «Отслеживаю».
+      const img = evBtn.dataset.img || '';
       if (evBtn.classList.contains('done')) return;
       if (src === 'ticketpro') {
         evBtn.classList.add('done'); evBtn.textContent = '✓ Слежу';
-        const ok = send({ a: 'add', k: 'event', s: 'ticketpro', q: title, u: url, t: title, g: cat });
+        const ok = send({ a: 'add', k: 'event', s: 'ticketpro', q: title, u: url, t: title, g: cat, m: img });
         haptic('medium');
         if (ok) toast('Добавлено! Бот подтвердит в чате');
         return;
       }
       if (src === 'bezkassira') {
         evBtn.classList.add('done'); evBtn.textContent = '✓ Слежу';
-        const ok = send({ a: 'add', k: 'event', s: 'bezkassira', q: title, u: url, t: title, g: cat });
+        const ok = send({ a: 'add', k: 'event', s: 'bezkassira', q: title, u: url, t: title, g: cat, m: img });
         haptic('medium');
         if (ok) toast('Добавлено! Бот подтвердит в чате');
         return;
@@ -1151,13 +1168,13 @@
           openCityModal('Выберите город', 'Где следить за билетами на «' + title + '»?', cities, function (city) {
             const c = city == null ? 'all' : city;
             const cityMeta = city == null ? ' (все города)' : (city === 'all' ? ' (все города)' : ' (' + cityLabelStatic(city) + ')');
-            send({ a: 'add', k: 'event', s: 'afisha', q: title, u: url, t: title + cityMeta, c: c, g: cat });
+            send({ a: 'add', k: 'event', s: 'afisha', q: title, u: url, t: title + cityMeta, c: c, g: cat, m: img });
             haptic('medium');
             toast('Добавлено! Бот подтвердит в чате');
           });
         } else {
           evBtn.textContent = '✓ Слежу';
-          const ok = send({ a: 'add', k: 'event', s: 'afisha', q: title, u: url, t: title, g: cat });
+          const ok = send({ a: 'add', k: 'event', s: 'afisha', q: title, u: url, t: title, g: cat, m: img });
           haptic('medium');
           if (ok) toast('Добавлено! Бот подтвердит в чате');
         }
@@ -1199,10 +1216,11 @@
       const title = vBtn.dataset.title;
       const url = vBtn.dataset.url;
       const src = vBtn.dataset.src || 'afisha';
+      const img = vBtn.dataset.img || '';
       if (vBtn.classList.contains('done')) return;
       if (src === 'ticketpro') {
         vBtn.classList.add('done'); vBtn.textContent = '✓ Слежу';
-        const ok = send({ a: 'add', k: 'venue', s: 'ticketpro', q: title, u: url, t: title });
+        const ok = send({ a: 'add', k: 'venue', s: 'ticketpro', q: title, u: url, t: title, m: img });
         haptic('medium');
         if (ok) toast('Добавлено! Бот подтвердит в чате');
         return;

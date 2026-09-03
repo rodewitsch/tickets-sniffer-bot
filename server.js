@@ -15,7 +15,7 @@ import { runCheck } from './lib/checker.js';
 import { runMigrations } from './migrate.js';
 import { fetchEventCities, AFISHA_HOSTS } from './lib/sources/afisha.js';
 import { searchTicketpro, searchTicketproVenues, enrichTicketproCategories } from './lib/sources/ticketpro.js';
-import { searchBezkassira, fetchBezkassiraOrganizer, enrichBezkassiraCategories } from './lib/sources/bezkassira.js';
+import { searchBezkassira, fetchBezkassiraOrganizer, enrichBezkassiraDetails } from './lib/sources/bezkassira.js';
 import { cityLabel } from './lib/cities.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -192,14 +192,19 @@ async function handleBezkassiraSearch(req, res, url) {
   try {
     const found = await searchBezkassira(q);
     // Тип (кино/театр/концерт/…) в выдаче BezKassira не выводится и в URL события
-    // не зашит — читаем его из хлебных крошек страницы события (как тип у bycard).
-    const events = await enrichBezkassiraCategories(found);
+    // не зашит — читаем его из хлебных крошек страницы события (как тип у bycard);
+    // дату и диапазон цен добираем из JSON-LD той же страницы (за один заход),
+    // чтобы карточки поиска выглядели как у Ticketpro.
+    const events = await enrichBezkassiraDetails(found);
     sendHeaders(res, corsHeaders(req), 200, {
       ok: true,
       events: events.slice(0, 20).map((e) => ({
         uid: e.uid, title: e.title, url: e.url, image: e.image,
         category: e.category || null,
         venue: e.venue, city: e.city,
+        dateText: e.dateText || null, startsAt: e.startsAt || null,
+        priceFrom: e.priceFrom || null, priceTo: e.priceTo || null,
+        currency: e.currency || null,
       })),
     });
   } catch (err) {
