@@ -990,6 +990,11 @@
         ? 'от ' + e.priceFrom + ' до ' + e.priceTo + ' ' + (e.currency || 'BYN')
         : 'от ' + e.priceFrom + ' ' + (e.currency || 'BYN');
     }
+    // Наличие: показываем только когда источник его знает (onSale === true/false).
+    // У Афиши и Ticketpro наличие не отдаётся в выдаче, поэтому null → строки нет.
+    let avail = '';
+    if (e.onSale === true) avail = '🎟 В продаже';
+    else if (e.onSale === false) avail = '🕒 Ещё не в продаже';
     return '<div class="card">' +
       (e.image ? '<img class="thumb" src="' + esc(e.image) + '" alt="" loading="lazy">'
                : '<div class="thumb placeholder">🎫</div>') +
@@ -997,6 +1002,7 @@
         '<div class="title">' + esc(e.title) + '</div>' +
         '<div class="meta">' + esc(metaParts.join(' · ') || 'Событие') + '</div>' +
         (price ? '<div class="meta">💰 ' + esc(price) + '</div>' : '') +
+        (avail ? '<div class="meta">' + esc(avail) + '</div>' : '') +
         '<div class="actions">' + e.actionsHtml + '</div>' +
       '</div></div>';
   }
@@ -1081,6 +1087,7 @@
         category: e.category || null, venue: e.venue, city: e.city,
         dateText: e.dateText || null,
         priceFrom: e.priceFrom, priceTo: e.priceTo, currency: e.currency,
+        onSale: e.onSale === true ? true : (e.onSale === false ? false : null),
         actionsHtml: actions,
       });
     });

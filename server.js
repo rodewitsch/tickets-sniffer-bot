@@ -205,6 +205,8 @@ async function handleBezkassiraSearch(req, res, url) {
         dateText: e.dateText || null, startsAt: e.startsAt || null,
         priceFrom: e.priceFrom || null, priceTo: e.priceTo || null,
         currency: e.currency || null,
+        // Наличие по HTML страницы события (у BezKassira JSON-LD всегда InStock).
+        onSale: e.onSale == null ? null : e.onSale, status: e.status || null,
       })),
     });
   } catch (err) {
