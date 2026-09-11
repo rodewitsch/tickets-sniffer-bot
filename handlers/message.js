@@ -5,9 +5,9 @@ import { sql } from '../db.js';
 import {
   WELCOME, HELP, helpKeyboard,
   mainMenuKeyboard, mainReplyKeyboard, proposeAddKeyboard, proposeAddText,
-  renderWatchlist, watchlistKeyboard,
+  renderWatchlist, unsubConfirmText, unsubConfirmKeyboard, NO_LINK_PREVIEW,
 } from '../lib/menus.js';
-import { listWatchItems, miniAppUrl, miniAppConfigured } from '../lib/watch.js';
+import { listWatchItems, miniAppUrl, miniAppConfigured, getWatchItem } from '../lib/watch.js';
 import { handleWebAppData } from '../lib/webapp.js';
 import { sendStatsReport } from '../lib/stats.js';
 import { sendFreshReplyKeyboard } from '../lib/reply.js';
@@ -49,7 +49,28 @@ export default async function (message) {
     return;
   }
 
-  if (text === '/start') {
+  if (text === '/start' || text.startsWith('/start ')) {
+    // Диплинк из сообщения «Мой список»: /start unsub_<id> — отписка от позиции.
+    // Позицию ищем по chatId, так что чужая (пересланная) ссылка ничего не сломает.
+    const payload = text.slice('/start'.length).trim();
+    const byLink = payload.match(/^unsub_(\d+)$/);
+    if (byLink) {
+      const item = await getWatchItem(chatId, Number(byLink[1]));
+      if (!item) {
+        await api.sendMessage({
+          chat_id: chatId,
+          text: '🤔 Эта позиция уже не отслеживается — возможно, вы отписались раньше.\nПришлите /list, чтобы посмотреть актуальный список.',
+        });
+        return;
+      }
+      await api.sendMessage({
+        chat_id: chatId,
+        text: unsubConfirmText(item),
+        parse_mode: 'HTML',
+        reply_markup: unsubConfirmKeyboard(item.id),
+      });
+      return;
+    }
     const items = await listWatchItems(chatId);
     await api.sendMessage({
       chat_id: chatId,
@@ -71,7 +92,10 @@ export default async function (message) {
       chat_id: chatId,
       text: renderWatchlist(items),
       parse_mode: 'HTML',
-      reply_markup: items.length ? watchlistKeyboard(items) : undefined,
+      // Кнопок удаления больше нет (отписка — ссылкой 🔕 у позиции), поэтому
+      // для непустого списка клавиатуру не шлём, а превью ссылок отключаем.
+      link_preview_options: NO_LINK_PREVIEW,
+      reply_markup: items.length ? undefined : mainMenuKeyboard(miniAppUrl(items), miniAppConfigured()),
     });
     return;
   }

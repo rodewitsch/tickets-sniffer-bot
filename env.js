@@ -11,3 +11,7 @@ export const PORT = Number(process.env.PORT || 8080);
 
 // Секрет для проверки запросов на /check (защита крона).
 export const CHECK_SECRET = process.env.CHECK_SECRET || '';
+
+// Username бота без @ — нужен для ссылок-диплинков в сообщениях («🔕 отписаться»).
+// Значение должно совпадать с реальным username, иначе ссылка откроет чужого бота.
+export const BOT_USERNAME = process.env.BOT_USERNAME || 'tickets_sniffer_bot';

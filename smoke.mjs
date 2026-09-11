@@ -1,10 +1,13 @@
-// Локальный smoke-тест слоя БД (Drizzle + better-sqlite3).
-// Запуск: node smoke.mjs
+// Локальный smoke-тест слоя БД (Drizzle + better-sqlite3) и чистых хелперов
+// рендера списка (эмодзи/ссылки). Запуск: node smoke.mjs
 import assert from 'node:assert';
 import { count } from 'drizzle-orm';
 import db, { eq, and, desc } from './db.js';
 import { users, events, watchItems } from './schema.js';
 import { runMigrations } from './migrate.js';
+import {
+  renderWatchlist, itemEmoji, unsubDeepLink, unsubConfirmText, unsubConfirmKeyboard,
+} from './lib/menus.js';
 
 async function main() {
   // применяем миграции (как migrate), чтобы тест работал на чистой БД
@@ -58,7 +61,38 @@ async function main() {
   const afterDel = await db.select().from(watchItems).where(eq(watchItems.chatId, 1)).all();
   assert.equal(afterDel.length, 1, 'deleted one');
 
-  console.log('✅ smoke PASS: db works (insert/onConflict/returning/filter/count/update/delete/order)');
+  // «Мой список»: эмодзи по типу/категории + ссылки-диплинки, без кнопок удаления.
+  assert.equal(itemEmoji({ kind: 'query' }), '🔍', 'query emoji');
+  assert.equal(itemEmoji({ kind: 'venue' }), '🏟', 'venue emoji');
+  assert.equal(itemEmoji({ kind: 'event', category: 'Кино' }), '🎬', 'cinema emoji');
+  assert.equal(itemEmoji({ kind: 'event', category: 'Концерты' }), '🎤', 'concert emoji');
+  assert.equal(itemEmoji({ kind: 'event', category: 'Выставка' }), '🖼', 'exhibition emoji');
+  assert.equal(itemEmoji({ kind: 'event', category: 'Нечто' }), '🎫', 'unknown category fallback');
+  assert.equal(unsubDeepLink(7), 'https://t.me/tickets_sniffer_bot?start=unsub_7', 'deep link shape');
+
+  const listText = renderWatchlist([
+    { id: 1, kind: 'event', source: 'afisha', title: 'Идиоты & Ко', category: 'Театр', city: 'minsk', eventUrl: 'https://bycard.by/x?a=1&b=2' },
+    { id: 2, kind: 'venue', source: 'ticketpro', title: 'Мир', city: 'brest', eventUrl: 'https://tp/1' },
+    { id: 3, kind: 'query', source: 'all', query: 'спайдермен' },
+  ]);
+  assert.ok(listText.includes('📋 <b>Мой список</b> · 3 позиции'), 'header with plural');
+  assert.ok(listText.includes('🎭 <b><a href="https://bycard.by/x?a=1&amp;b=2">Идиоты &amp; Ко</a></b>'), 'escaped clickable title');
+  assert.ok(listText.includes('🏟 <b><a href="https://tp/1">Мир</a></b>'), 'venue title is a link');
+  assert.ok(listText.includes('🔍 <b>спайдермен</b>'), 'query title is plain text');
+  assert.ok(listText.includes('<a href="https://t.me/tickets_sniffer_bot?start=unsub_3">🔕 отписаться</a>'), 'per-item unsubscribe link');
+  assert.ok(listText.includes('Театр · Афиша · 📍 Минск'), 'type/source/city meta');
+  assert.ok(!listText.includes('❌'), 'no delete buttons in text');
+  assert.ok(!listText.includes('callback'), 'no callback data leaked');
+
+  const emptyText = renderWatchlist([]);
+  assert.ok(emptyText.includes('Список пуст') && emptyText.includes('Найти и следить'), 'empty list CTA');
+
+  assert.ok(unsubConfirmText({ kind: 'event', source: 'afisha', category: 'Театр', title: 'Идиоты', city: 'minsk' }).includes('Отписаться?'), 'confirm text');
+  const confirmKb = unsubConfirmKeyboard(5).inline_keyboard;
+  assert.equal(confirmKb[0][0].callback_data, 'unsub:yes:5', 'confirm yes callback');
+  assert.equal(confirmKb[1][0].callback_data, 'unsub:no:5', 'confirm no callback');
+
+  console.log('✅ smoke PASS: db works (insert/onConflict/returning/filter/count/update/delete/order) + list render (emoji/links/deep-link)');
 }
 
 main().catch((e) => { console.error('✗ smoke FAIL', e); process.exit(1); });

@@ -1,9 +1,10 @@
 import { api } from '../api.js';
-import { HELP, helpKeyboard, renderWatchlist, watchlistKeyboard, mainMenuKeyboard } from '../lib/menus.js';
-import { listWatchItems, removeWatchItem, deactivateWatchItem, miniAppUrl, miniAppConfigured, SOURCE_LABEL } from '../lib/watch.js';
+import { HELP, helpKeyboard, renderWatchlist, mainMenuKeyboard, NO_LINK_PREVIEW } from '../lib/menus.js';
+import { listWatchItems, removeWatchItem, deactivateWatchItem, getWatchItem, miniAppUrl, miniAppConfigured, SOURCE_LABEL } from '../lib/watch.js';
 import { addWatchItem } from '../lib/watch.js';
 import { sendFreshReplyKeyboard } from '../lib/reply.js';
 import { startFeedback, clearFeedback } from '../lib/feedback.js';
+import { escapeHtml } from '../lib/util.js';
 
 // Промпт режима ввода обращения + кнопка «Отмена» (инлайн на том же сообщении).
 const FEEDBACK_PROMPT_TEXT =
@@ -76,28 +77,73 @@ export default async function (cb) {
   if (data === 'wl:list') {
     const items = await listWatchItems(chatId);
     const text = renderWatchlist(items);
-    const kb = items.length ? watchlistKeyboard(items) : mainMenuKeyboard(miniAppUrl(items), miniAppConfigured());
+    // Кнопок удаления в списке больше нет: отписка — ссылкой 🔕 у каждой позиции,
+    // а превью ссылок (страницы событий) отключено, чтобы не разворачивалась карточка.
+    const kb = items.length ? undefined : mainMenuKeyboard(miniAppUrl(items), miniAppConfigured());
     if (isEditable) {
-      await api.editMessageText({ chat_id: chatId, message_id: msgId, text, parse_mode: 'HTML', reply_markup: kb });
+      await api.editMessageText({ chat_id: chatId, message_id: msgId, text, parse_mode: 'HTML', reply_markup: kb, link_preview_options: NO_LINK_PREVIEW });
     } else {
-      await api.sendMessage({ chat_id: chatId, text, parse_mode: 'HTML', reply_markup: kb });
+      await api.sendMessage({ chat_id: chatId, text, parse_mode: 'HTML', reply_markup: kb, link_preview_options: NO_LINK_PREVIEW });
     }
     return;
   }
 
+  // Легаси-ветка: старые сообщения списка (до перехода на ссылки) ещё живут
+  // в истории чатов с кнопками «❌ <название>». Оставляем, чтобы они работали.
   if (data.startsWith('del:')) {
     const id = Number(data.slice(4));
     await removeWatchItem(chatId, id);
     const items = await listWatchItems(chatId);
     const text = renderWatchlist(items);
-    const kb = items.length ? watchlistKeyboard(items) : undefined;
+    const kb = items.length ? undefined : mainMenuKeyboard(miniAppUrl(items), miniAppConfigured());
     if (isEditable) {
-      await api.editMessageText({ chat_id: chatId, message_id: msgId, text, parse_mode: 'HTML', reply_markup: kb });
+      await api.editMessageText({ chat_id: chatId, message_id: msgId, text, parse_mode: 'HTML', reply_markup: kb, link_preview_options: NO_LINK_PREVIEW });
     } else {
-      await api.sendMessage({ chat_id: chatId, text, parse_mode: 'HTML', reply_markup: kb });
+      await api.sendMessage({ chat_id: chatId, text, parse_mode: 'HTML', reply_markup: kb, link_preview_options: NO_LINK_PREVIEW });
     }
     // Обновляем reply-клавиатуру (кнопка Mini App) — свежий снапшот списка.
     await sendFreshReplyKeyboard(chatId, '🗑 Позиция удалена из списка отслеживания.');
+    return;
+  }
+
+  // Подтверждение отписки по ссылке из списка: unsub:yes:<id> | unsub:no:<id>.
+  if (data.startsWith('unsub:')) {
+    const parts = data.split(':');
+    const action = parts[1];
+    const id = Number(parts[2]);
+    // Владельца проверяем по chatId (FK в SQLite нет): чужая ссылка даст null.
+    const item = await getWatchItem(chatId, id);
+    const name = escapeHtml(item ? (item.title || item.query) : '');
+    if (action === 'no') {
+      const text = item
+        ? `👍 Оставляю «${name}» в списке.`
+        : '👍 Ничего не меняю.';
+      if (isEditable) {
+        await api.editMessageText({ chat_id: chatId, message_id: msgId, text, parse_mode: 'HTML', reply_markup: { inline_keyboard: [] } });
+      } else {
+        await api.sendMessage({ chat_id: chatId, text, parse_mode: 'HTML' });
+      }
+      return;
+    }
+    if (!item) {
+      const text = '🤔 Эта позиция уже не отслеживается — возможно, вы отписались раньше.';
+      if (isEditable) {
+        await api.editMessageText({ chat_id: chatId, message_id: msgId, text, parse_mode: 'HTML', reply_markup: { inline_keyboard: [] } });
+      } else {
+        await api.sendMessage({ chat_id: chatId, text, parse_mode: 'HTML' });
+      }
+      return;
+    }
+    await removeWatchItem(chatId, id);
+    const text = `🔕 Отписано: «${name}».`;
+    if (isEditable) {
+      try {
+        await api.editMessageText({ chat_id: chatId, message_id: msgId, text, parse_mode: 'HTML', reply_markup: { inline_keyboard: [] } });
+      } catch { /* сообщение могло измениться */ }
+    }
+    // Единственное подтверждение — сообщение со свежей reply-клавиатурой
+    // (несёт свежий снапшот списка для Mini App), как у del:/mute:.
+    await sendFreshReplyKeyboard(chatId, text);
     return;
   }
 
