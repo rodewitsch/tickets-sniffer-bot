@@ -1152,12 +1152,10 @@
       // Город площадки берём из её слага, чтобы отличать одноимённые площадки.
       const citySlug = venueCityFromSlug(o.slug);
       const cityLbl = citySlug ? cityLabelStatic(citySlug) : '';
-      // Ссылка на афишу площадки: страница категории города + фильтр ?objectsIds=<id>.
-      // Публичные «страницы площадок» на 24afisha.by сейчас не работают, а этот
-      // фильтр открывает реальные события площадки. Бот при добавлении уточнит
-      // ссылку (подставит настоящую категорию), id в URL включает слежение.
-      const venueUrl = AFISHA_SITE + '/ru/' + (citySlug || 'minsk') + '/events/' + o.slug +
-        '?objectsIds=' + o.id;
+      // Канонический рабочий адрес страницы площадки. Старый
+      // /ru/<city>/events/<slug> отдаёт «Билеты в undefined» и пустой список,
+      // поэтому ведём на /ru/object/<slug> (работает для всех типов площадок).
+      const venueUrl = AFISHA_SITE + '/ru/object/' + o.slug;
       const metaParts = ['Площадка'];
       if (o.type && o.type.name) metaParts.push(o.type.name);
       if (cityLbl) metaParts.push(cityLbl);
