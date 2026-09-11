@@ -60,6 +60,14 @@ Compose (`bot`, `cron`, `web`/Caddy).
   (у кино `more[]` пуст, у театра `events[]` пуст). Ссылка площадки — `/ru/object/<slug>`.
   См. `fetchAfishaVenue(Events)` / `afishaVenueListingUrl` в `lib/sources/afisha.js`.
   Одноимённые площадки различаются городом (он зашит в slug/id), а не выбором города вручную.
+- **Битые страницы событий (afisha)**: часть страниц `/ru/<city>/event/<slug>` на 24afisha.by
+  падает в SSR — HTTP 500, «Server error» (напр. `idioty-2`; причина в серверном рендере
+  отзывов: `TypeError: Cannot read property '200x200' of undefined`). Через клиентскую
+  навигацию (поиск на сайте) та же страница открывается. Лечится подменой на bycard.by
+  (общий бэкенд, страница всегда открывается): `afishaWorkingEventUrl(url)` в
+  `lib/sources/afisha.js` (проверка кэшируется) — применяется при добавлении события
+  (`lib/webapp.js`), в уведомлениях (`notifyIfDue` в `lib/checker.js`) и в позиции
+  (`checkEventItem`). В мини-приложении «Открыть» у событий ведёт на bycard.by.
 - **Afisha `events.uid` — city-aware**: `'<slug>@<city>'` (образует `afishaUidForCity`).
   Одно событие кэшируется отдельно по городам.
 - **Сервер**: есть служебный эндпоинт `GET /api/event-cities?url=…` (CORS) для выбора

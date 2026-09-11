@@ -750,6 +750,9 @@
   const SRC = { all: 'все источники', afisha: 'Афиша', ticketpro: 'Ticketpro', bezkassira: 'BezKassira' };
   const AFISHA_API = 'https://api.24afisha.by/api/v2/search';
   const AFISHA_SITE = 'https://24afisha.by';
+  // Второй домен «Афиши» (общий бэкенд). Часть страниц событий на 24afisha.by
+  // отдаёт SSR-ошибку («Server error»), а на bycard.by та же страница открывается.
+  const BYCARD_SITE = 'https://bycard.by';
 
   // Публичный домен бота для эндпоинта /api/event-cities (выбор городов события).
   // Указывается через ?api=https://ваш-домен в URL Mini App (см. lib/config.js MINIAPP_URL).
@@ -1134,13 +1137,16 @@
     performances.slice(0, 20).forEach(function (p) {
       const img = p.image && (p.image['300x430'] || p.image['240x340'] || p.image.original);
       const evUrl = AFISHA_SITE + '/ru/minsk/event/' + p.slug;
+      // «Открыть» ведём на bycard.by: часть страниц событий на 24afisha.by падает
+      // в SSR («Server error»), а bycard.by (общий бэкенд) открывается всегда.
+      const openUrl = BYCARD_SITE + '/afisha/minsk/event/' + p.slug;
       const type = p.types && p.types[0] && p.types[0].name;
       // У Афиши/ByCard в выдаче поиска нет ни даты, ни цены (цена по событию
       // доступна только через отдельный schedule API по id+городу, см. AGENTS.md) —
       // поэтому карточка рисуется той же разметкой, но без строк даты и цены.
       const actions =
         '<button class="btn" data-add-event="' + esc(p.slug) + '" data-title="' + esc(p.name) + '" data-url="' + esc(evUrl) + '" data-cat="' + esc(type || '') + '" data-img="' + esc(img || '') + '">Следить</button>' +
-        '<a class="btn ghost" href="' + esc(evUrl) + '" target="_blank" rel="noopener">Открыть</a>';
+        '<a class="btn ghost" href="' + esc(openUrl) + '" target="_blank" rel="noopener">Открыть</a>';
       html += eventCardHtml({
         title: p.name, image: img, url: evUrl,
         category: type || null, venue: null, city: null,
