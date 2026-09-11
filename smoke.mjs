@@ -83,6 +83,11 @@ async function main() {
   assert.ok(listText.includes('Театр · Афиша · 📍 Минск'), 'type/source/city meta');
   assert.ok(!listText.includes('❌'), 'no delete buttons in text');
   assert.ok(!listText.includes('callback'), 'no callback data leaked');
+  // Ловим двойное экранирование переводов строки: в тексте не должно быть
+  // литерала «обратный слэш + n» (строка собрана через String.fromCharCode(92),
+  // чтобы проверка сама не зависела от экранирования в исходнике).
+  assert.ok(!listText.includes(String.fromCharCode(92) + 'n'), 'no literal backslash-n in the rendered list');
+  assert.ok(listText.endsWith('события или площадки.</i>'), 'footer is the last line');
 
   const emptyText = renderWatchlist([]);
   assert.ok(emptyText.includes('Список пуст') && emptyText.includes('Найти и следить'), 'empty list CTA');

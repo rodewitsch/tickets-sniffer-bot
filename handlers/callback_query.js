@@ -136,10 +136,17 @@ export default async function (cb) {
     }
     await removeWatchItem(chatId, id);
     const text = `🔕 Отписано: «${name}».`;
+    // Промпт с кнопками убираем: правка его тем же текстом + отдельное сообщение
+    // ниже давали два одинаковых «Отписано» в чате. Если удалить не вышло — снимаем
+    // с промпта клавиатуру, чтобы кнопки ✅/↩️ не оставались кликабельными.
     if (isEditable) {
       try {
-        await api.editMessageText({ chat_id: chatId, message_id: msgId, text, parse_mode: 'HTML', reply_markup: { inline_keyboard: [] } });
-      } catch { /* сообщение могло измениться */ }
+        await api.deleteMessage({ chat_id: chatId, message_id: msgId });
+      } catch {
+        try {
+          await api.editMessageReplyMarkup({ chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [] } });
+        } catch { /* сообщение могло исчезнуть */ }
+      }
     }
     // Единственное подтверждение — сообщение со свежей reply-клавиатурой
     // (несёт свежий снапшот списка для Mini App), как у del:/mute:.
