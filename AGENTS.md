@@ -51,6 +51,14 @@ Compose (`bot`, `cron`, `web`/Caddy).
   `GET api.24afisha.by/api/v2/schedule/events/<числовой-id события>?cityId=<N>` →
   `data[0].objects[].sessions[].isSaleOpen`. Список городов: `GET /api/v2/cities` (slug→id).
   Кино размечено JSON-LD как `Movie` (без offers/location) — JSON-LD там бесполезен.
+- **Площадки (afisha)**: публичные страницы площадок `/ru/<city>/events/<slug>` на
+  24afisha.by «битые» (пустая страница, title «Билеты в undefined») — скрапить их нельзя.
+  Афишу площадки берём из `GET /api/v2/schedule/objects/<числовой-id площадки>`
+  (`data[0].cityId`, `data[0].events[].sessions[].isSaleOpen`, типы — `events[].types[].slug`).
+  Id площадки хранится в URL позиции фильтром `?objectsIds=<id>`, рабочая ссылка —
+  `/ru/<city>/events/<category>?objectsIds=<id>`. См. `fetchAfishaVenue(Events)` /
+  `afishaVenueListingUrl` в `lib/sources/afisha.js`. Одноимённые площадки различаются
+  городом (он зашит в slug/id), а не выбором города вручную.
 - **Afisha `events.uid` — city-aware**: `'<slug>@<city>'` (образует `afishaUidForCity`).
   Одно событие кэшируется отдельно по городам.
 - **Сервер**: есть служебный эндпоинт `GET /api/event-cities?url=…` (CORS) для выбора

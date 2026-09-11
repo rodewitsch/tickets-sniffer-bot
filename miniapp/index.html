@@ -931,6 +931,21 @@
     return found ? found.label : slug;
   }
 
+  // Слаг города из слага площадки «афиши»: в слаге площадки зашит город
+  // (kinoteatr-mir-brest-brest → brest, kinoteatr-mir-minsk → minsk). Нужен,
+  // чтобы отличать одноимённые площадки в разных городах («Мир» есть в Минске,
+  // Бресте, Витебске и Гомеле).
+  const CITY_SLUGS_BY_LEN = CITIES.map(function (c) { return c.slug; })
+    .filter(Boolean).sort(function (a, b) { return b.length - a.length; });
+  function venueCityFromSlug(slug) {
+    const s = String(slug || '').toLowerCase();
+    for (let i = 0; i < CITY_SLUGS_BY_LEN.length; i++) {
+      const c = CITY_SLUGS_BY_LEN[i];
+      if (s === c || s.endsWith('-' + c)) return c;
+    }
+    return '';
+  }
+
   // ---------- вкладки ----------
   function show(view) {
     $('view-search').classList.toggle('hidden', view !== 'search');
@@ -1134,14 +1149,25 @@
       });
     });
     objects.slice(0, 10).forEach(function (o) {
-      const venueUrl = AFISHA_SITE + '/ru/minsk/events/' + o.slug;
+      // Город площадки берём из её слага, чтобы отличать одноимённые площадки.
+      const citySlug = venueCityFromSlug(o.slug);
+      const cityLbl = citySlug ? cityLabelStatic(citySlug) : '';
+      // Ссылка на афишу площадки: страница категории города + фильтр ?objectsIds=<id>.
+      // Публичные «страницы площадок» на 24afisha.by сейчас не работают, а этот
+      // фильтр открывает реальные события площадки. Бот при добавлении уточнит
+      // ссылку (подставит настоящую категорию), id в URL включает слежение.
+      const venueUrl = AFISHA_SITE + '/ru/' + (citySlug || 'minsk') + '/events/' + o.slug +
+        '?objectsIds=' + o.id;
+      const metaParts = ['Площадка'];
+      if (o.type && o.type.name) metaParts.push(o.type.name);
+      if (cityLbl) metaParts.push(cityLbl);
       html += '<div class="card">' +
         '<div class="thumb placeholder">🏟</div>' +
         '<div class="info">' +
           '<div class="title">' + esc(o.name) + '</div>' +
-          '<div class="meta">Площадка' + (o.type && o.type.name ? ' · ' + esc(o.type.name) : '') + '</div>' +
+          '<div class="meta">' + esc(metaParts.join(' · ')) + '</div>' +
           '<div class="actions">' +
-            '<button class="btn" data-add-venue="' + esc(o.slug) + '" data-title="' + esc(o.name) + '" data-url="' + esc(venueUrl) + '">Следить за площадкой</button>' +
+            '<button class="btn" data-add-venue="' + esc(o.slug) + '" data-title="' + esc(o.name) + '" data-url="' + esc(venueUrl) + '" data-city="' + esc(citySlug) + '">Следить за площадкой</button>' +
           '</div>' +
         '</div></div>';
     });
@@ -1241,13 +1267,14 @@
         return;
       }
       vBtn.classList.add('done'); vBtn.textContent = '…';
-      openCityModal('Город площадки', 'В каком городе следить за площадкой «' + title + '»?', CITIES.slice(0, 6), function (city) {
-        vBtn.textContent = '✓ Слежу';
-        const meta = city ? ' (' + cityLabelStatic(city) + ')' : '';
-        const ok = send({ a: 'add', k: 'venue', s: 'afisha', q: title, u: url, t: title + meta, c: city });
-        haptic('medium');
-        if (ok) toast('Добавлено! Бот подтвердит в чате');
-      });
+      // Площадка «афиши» находится в одном городе (он зашит в её id/slug),
+      // поэтому город не спрашиваем — берём его из карточки. Иначе одноимённые
+      // площадки («Мир» в Минске/Бресте/Витебске/Гомеле) не отличить.
+      const vCity = vBtn.dataset.city || '';
+      vBtn.textContent = '✓ Слежу';
+      const ok = send({ a: 'add', k: 'venue', s: 'afisha', q: title, u: url, t: title, c: vCity || null });
+      haptic('medium');
+      if (ok) toast('Добавлено! Бот подтвердит в чате');
     }
   });
 
