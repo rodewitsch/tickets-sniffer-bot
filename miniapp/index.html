@@ -12,17 +12,30 @@
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
   :root {
+    /* Бренд из логотипа «Билетный радар»: тёмно-синий navy + зелёный «радар». */
+    --navy-900: #060f22;
+    --navy-800: #0b1b33;
+    --navy-700: #132b4d;
+    --navy-600: #1e3c68;
+    --radar: #35e27a;
+    --radar-dim: #1fbf63;
+    --radar-ink: #06131f;
+    --radar-soft: rgba(53, 226, 122, 0.22);
+
+    /* Рабочий Mini App остаётся на теме Telegram (светлая/тёмная) —
+       меняем только акцент: синий Telegram → брендовый зелёный. */
     --bg: var(--tg-theme-bg-color, #ffffff);
     --text: var(--tg-theme-text-color, #111827);
     --hint: var(--tg-theme-hint-color, #6b7280);
-    --btn: var(--tg-theme-button-color, #2481cc);
-    --btn-text: var(--tg-theme-button-text-color, #ffffff);
-    --bg2: var(--tg-theme-secondary-bg-color, #f3f4f6);
-    --card: var(--tg-theme-secondary-bg-color, #f3f4f6);
-    --accent: var(--tg-theme-button-color, #2481cc);
+    --btn: var(--radar);
+    --btn-text: var(--radar-ink);
+    --bg2: var(--tg-theme-secondary-bg-color, #f1f4f9);
+    --card: var(--tg-theme-secondary-bg-color, #f1f4f9);
+    --accent-ink: #0a7f45;
     --danger: #e5484d;
-    --ok: #30a46c;
   }
+  /* В тёмной теме Telegram светло-зелёный читается лучше тёмного. */
+  html[data-tg-scheme="dark"] { --accent-ink: #35e27a; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
   body {
@@ -34,14 +47,37 @@
   }
   .hidden { display: none !important; }
 
+  /* Шапка — всегда брендовая (navy из логотипа), независимо от темы Telegram. */
   header {
     position: sticky; top: 0; z-index: 10;
-    background: var(--bg);
+    background: var(--navy-800);
     padding: 14px 16px 10px;
-    border-bottom: 1px solid var(--bg2);
+    border-bottom: 1px solid var(--navy-600);
   }
-  header h1 { font-size: 19px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
-  header .sub { color: var(--hint); font-size: 12.5px; margin-top: 2px; }
+  header h1 {
+    font-size: 17px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase;
+    color: #f4f8ff;
+    display: flex; align-items: center; gap: 9px;
+  }
+  header .sub { color: #93a7c6; font-size: 12.5px; margin-top: 3px; }
+
+  /* Точка радара — мотив логотипа (зелёная точка на конце развёртки). */
+  .radar-dot {
+    position: relative;
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--radar);
+    box-shadow: 0 0 0 3px rgba(53, 226, 122, 0.22), 0 0 10px rgba(53, 226, 122, 0.7);
+    flex-shrink: 0;
+  }
+  .radar-dot::after {
+    content: ""; position: absolute; inset: -2px;
+    border-radius: 50%; border: 1.5px solid var(--radar);
+    animation: radar-ping 2.6s ease-out infinite;
+  }
+  @keyframes radar-ping {
+    0%   { transform: scale(.7); opacity: .85; }
+    100% { transform: scale(2); opacity: 0; }
+  }
 
   nav.tabs {
     display: flex; gap: 6px;
@@ -68,7 +104,7 @@
     padding: 11px 14px; font-size: 15px;
     outline: none;
   }
-  .searchbar input:focus { border-color: var(--accent); }
+  .searchbar input:focus { border-color: var(--accent-ink); }
 
   .chips { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
   .chip {
@@ -81,7 +117,7 @@
     cursor: pointer;
     transition: all .15s;
   }
-  .chip.active { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--bg)); }
+  .chip.active { border-color: var(--accent-ink); color: var(--accent-ink); background: color-mix(in srgb, var(--radar) 15%, var(--bg)); }
 
   .hint-block {
     color: var(--hint); font-size: 13.5px; line-height: 1.45;
@@ -116,8 +152,9 @@
     border-radius: 9px;
     padding: 7px 13px; font-size: 13px; font-weight: 600;
   }
-  .btn.ghost { background: transparent; color: var(--accent); border: 1.5px solid var(--accent); }
-  .btn.done { background: var(--ok); color: #fff; }
+  .btn:active { filter: brightness(.94); }
+  .btn.ghost { background: transparent; color: var(--accent-ink); border: 1.5px solid var(--accent-ink); }
+  .btn.done { background: var(--radar-dim); color: var(--radar-ink); }
   .btn.del { background: transparent; color: var(--danger); border: 1.5px solid var(--danger); }
   a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 
@@ -132,6 +169,35 @@
   .watch-item .t .name { font-weight: 650; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; }
   .watch-item .t .meta { color: var(--hint); font-size: 12.5px; margin-top: 2px; }
   .watch-item .actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+
+  /* «Билетная» перфорация между превью и текстом карточки — мотив логотипа. */
+  .card .info,
+  .watch-item .t {
+    border-left: 1.5px dashed var(--radar-soft);
+    padding-left: 11px;
+  }
+
+  /* Статус «В продаже» — пульсирующая зелёная точка (как точка развёртки радара). */
+  .meta.avail {
+    display: flex; align-items: center; gap: 7px;
+    color: var(--accent-ink); font-weight: 600;
+  }
+  .meta.avail .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--radar);
+    box-shadow: 0 0 0 3px var(--radar-soft);
+    animation: avail-pulse 1.8s ease-in-out infinite;
+    flex-shrink: 0;
+  }
+  @keyframes avail-pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50%      { transform: scale(1.35); opacity: .7; }
+  }
+
+  /* Меньше движения — гасим радарные анимации. */
+  @media (prefers-reduced-motion: reduce) {
+    .radar-dot::after, .meta.avail .dot { animation: none; }
+  }
 
   .toast {
     position: fixed; left: 50%; transform: translateX(-50%);
@@ -195,7 +261,7 @@
     display: inline-block;
     width: 18px; height: 18px;
     border: 2.5px solid var(--bg2);
-    border-top-color: var(--accent);
+    border-top-color: var(--accent-ink);
     border-radius: 50%;
     animation: spin .8s linear infinite;
     margin: 24px auto; display: block;
@@ -226,29 +292,38 @@
   body.landing-mode #app { display: none !important; }
   body.landing-mode #landing { display: block; }
 
-  /* Цвета лендинга: светлая тема + авто-фолбэк тёмной */
+  /* Цвета лендинга: светлая тема + авто-фолбэк тёмной.
+     Акцент — зелёный «радар» из логотипа (синий Telegram убран). */
   :root, .landing-theme {
-    --l-bg: #f6f8fb;
-    --l-text: #101828;
-    --l-muted: #475467;
+    --l-bg: #f2f6fb;
+    --l-text: #0b1b33;
+    --l-muted: #52627c;
     --l-card: #ffffff;
-    --l-border: #e4e7ec;
-    --l-accent: #2481cc;
-    --l-accent-2: #0d5fa8;
-    --l-cta-text: #ffffff;
-    --l-badge: #eaf3fb;
+    --l-border: #dde5f1;
+    --l-accent: #0a7f45;      /* зелёный для ссылок/текста — AA на светлом фоне */
+    --l-accent-2: #08693a;
+    --l-cta-bg: #35e27a;      /* кнопка — «радарный» зелёный, как в логотипе */
+    --l-cta-hover: #22cf6c;
+    --l-cta-text: #06131f;    /* тёмно-синий текст на зелёной кнопке */
+    --l-badge: #e4f8eb;
+    --l-glow: rgba(53, 226, 122, 0.20);
+    --l-glow-2: rgba(53, 226, 122, 0.12);
   }
   @media (prefers-color-scheme: dark) {
     #landing {
-      --l-bg: #0b1220;
-      --l-text: #e9edf5;
-      --l-muted: #9aa6b8;
-      --l-card: #151e2e;
-      --l-border: #263349;
-      --l-accent: #3b9be8;
-      --l-accent-2: #69b6f2;
-      --l-cta-text: #0b1220;
-      --l-badge: rgba(59, 155, 232, 0.16);
+      --l-bg: #060f22;
+      --l-text: #eaf1ff;
+      --l-muted: #93a7c6;
+      --l-card: #0f2036;
+      --l-border: #1e3c68;
+      --l-accent: #35e27a;
+      --l-accent-2: #6bffa6;
+      --l-cta-bg: #35e27a;
+      --l-cta-hover: #56ee94;
+      --l-cta-text: #06131f;
+      --l-badge: rgba(53, 226, 122, 0.14);
+      --l-glow: rgba(53, 226, 122, 0.16);
+      --l-glow-2: rgba(53, 226, 122, 0.10);
     }
   }
 
@@ -268,6 +343,7 @@
     padding: 0 20px;
   }
   #landing a { color: var(--l-accent); }
+  #landing a:hover { color: var(--l-accent-2); }
 
   /* Глобальные правила Mini App (header{position:sticky…}, header h1, main{padding…})
      применяются ко ВСЕМ элементам — в т.ч. к семантическим <header>/<h1> лендинга.
@@ -306,33 +382,62 @@
     margin: 0 auto;
   }
   #landing .l-brand {
-    font-size: 20px;
+    display: inline-flex; align-items: center; gap: 9px;
+    font-size: 17px;
     font-weight: 800;
-    letter-spacing: -0.2px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
     color: var(--l-text);
   }
   #landing .l-nav .l-cta-sm {
     display: inline-block;
-    background: var(--l-accent);
+    background: var(--l-cta-bg);
     color: var(--l-cta-text);
     text-decoration: none;
-    font-weight: 600;
+    font-weight: 700;
     font-size: 14px;
     padding: 9px 16px;
     border-radius: 999px;
     white-space: nowrap;
-  }
-  @media (prefers-color-scheme: dark) {
-    #landing .l-nav .l-cta-sm { color: #0b1220; }
+    box-shadow: 0 8px 20px -10px rgba(35, 200, 110, 0.7);
   }
 
-  /* Герой-блок */
+  /* Герой-блок: navy-подложка + радарный мотив из логотипа */
   #landing .l-hero {
+    position: relative;
+    overflow: hidden;
     text-align: center;
     padding: 56px 20px 40px;
     background:
-      radial-gradient(900px 380px at 15% -80px, rgba(36,129,204,0.14), transparent),
-      radial-gradient(800px 360px at 90% 10%, rgba(36,129,204,0.10), transparent);
+      radial-gradient(900px 380px at 15% -80px, var(--l-glow), transparent),
+      radial-gradient(800px 360px at 90% 10%, var(--l-glow-2), transparent);
+  }
+  #landing .l-hero .wrap { position: relative; z-index: 1; }
+
+  /* Радар: концентрические дуги, точки и луч развёртки со зелёной точкой. */
+  #landing .l-radar {
+    position: absolute; top: 46%; left: 50%;
+    width: min(760px, 135%);
+    transform: translate(-50%, -50%);
+    color: var(--l-accent);
+    opacity: .45;
+    pointer-events: none; z-index: 0;
+    -webkit-mask-image: radial-gradient(closest-side, #000 52%, transparent 92%);
+    mask-image: radial-gradient(closest-side, #000 52%, transparent 92%);
+  }
+  #landing .l-radar svg { display: block; width: 100%; height: auto; }
+  /* На тёмном фоне радарную графику можно показать плотнее. */
+  @media (prefers-color-scheme: dark) {
+    #landing .l-radar { opacity: .6; }
+  }
+  #landing .l-sweep {
+    transform-box: view-box;
+    transform-origin: 320px 320px;
+    animation: l-sweep 7s linear infinite;
+  }
+  @keyframes l-sweep { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    #landing .l-sweep { animation: none; }
   }
   #landing .l-eyebrow {
     display: inline-block;
@@ -364,20 +469,17 @@
     align-items: center;
     justify-content: center;
     gap: 10px;
-    background: var(--l-accent);
+    background: var(--l-cta-bg);
     color: var(--l-cta-text);
     border-radius: 999px;
     font-size: 17px;
     font-weight: 700;
     text-decoration: none;
     padding: 15px 30px;
-    box-shadow: 0 10px 24px -10px rgba(36,129,204,0.6);
+    box-shadow: 0 12px 26px -12px rgba(35, 200, 110, 0.75);
     transition: transform .12s ease, background .12s ease;
   }
-  #landing .l-btn:hover { background: var(--l-accent-2); transform: translateY(-1px); }
-  @media (prefers-color-scheme: dark) {
-    #landing .l-btn { color: #0b1220; box-shadow: 0 10px 26px -12px rgba(59,155,232,0.5); }
-  }
+  #landing .l-btn:hover { background: var(--l-cta-hover); transform: translateY(-1px); }
   #landing .l-hero .l-share {
     margin-top: 14px;
     font-size: 13.5px;
@@ -407,14 +509,30 @@
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 18px;
   }
+  /* Карточка-«билет»: боковые вырезы, как у билета в логотипе. */
   #landing .l-feat {
+    position: relative;
     background: var(--l-card);
     border: 1px solid var(--l-border);
     border-radius: 16px;
     padding: 22px 18px;
     text-align: center;
   }
-  #landing .l-feat .ico { font-size: 30px; line-height: 1; }
+  #landing .l-feat::before,
+  #landing .l-feat::after {
+    content: ""; position: absolute; top: 50%;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: var(--l-bg);
+    transform: translateY(-50%);
+  }
+  #landing .l-feat::before { left: -9px; }
+  #landing .l-feat::after { right: -9px; }
+  #landing .l-feat .ico {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 46px; height: 46px; border-radius: 14px;
+    background: var(--l-badge);
+    font-size: 24px; line-height: 1;
+  }
   #landing .l-feat h3 { font-size: 17px; margin: 12px 0 6px; }
   #landing .l-feat p { color: var(--l-muted); font-size: 14.5px; margin: 0; }
 
@@ -439,13 +557,11 @@
     justify-content: center;
     width: 34px; height: 34px;
     border-radius: 50%;
-    background: var(--l-accent);
+    background: var(--l-cta-bg);
     color: var(--l-cta-text);
     font-weight: 800;
     margin: 0 auto 12px;
-  }
-  @media (prefers-color-scheme: dark) {
-    #landing .l-step .num { color: #0b1220; }
+    box-shadow: 0 0 0 4px var(--l-badge);
   }
   #landing .l-step h3 { font-size: 16px; margin: 0 0 6px; }
   #landing .l-step p { color: var(--l-muted); font-size: 14px; margin: 0; }
@@ -478,6 +594,7 @@
     padding: 60px 20px;
   }
   #landing .l-support .l-support-card {
+    position: relative;
     max-width: 640px;
     margin: 0 auto;
     background: var(--l-card);
@@ -485,8 +602,18 @@
     border-radius: 20px;
     padding: 44px 28px;
     text-align: center;
-    box-shadow: 0 12px 30px -18px rgba(20, 30, 60, 0.35);
+    box-shadow: 0 18px 40px -26px rgba(11, 27, 51, 0.55);
   }
+  /* Те же «билетные» вырезы, что и у карточек преимуществ. */
+  #landing .l-support .l-support-card::before,
+  #landing .l-support .l-support-card::after {
+    content: ""; position: absolute; top: 50%;
+    width: 22px; height: 22px; border-radius: 50%;
+    background: var(--l-bg);
+    transform: translateY(-50%);
+  }
+  #landing .l-support .l-support-card::before { left: -11px; }
+  #landing .l-support .l-support-card::after { right: -11px; }
   #landing .l-support .l-support-card h2 {
     font-size: clamp(22px, 3vw, 28px);
     margin: 0 0 16px;
@@ -519,11 +646,33 @@
      ================================================================ -->
 <div id="landing">
   <div class="l-nav wrap">
-    <div class="l-brand">🎫 Билетный радар</div>
+    <div class="l-brand"><span class="radar-dot"></span>Билетный радар</div>
     <a class="l-cta-sm" href="https://t.me/tickets_sniffer_bot" rel="noopener" target="_blank">Открыть в Telegram</a>
   </div>
 
   <header class="l-hero">
+    <!-- Мотив логотипа: радарные дуги, точки и развёртка с зелёной точкой. -->
+    <div class="l-radar" aria-hidden="true">
+      <svg viewBox="0 0 640 640" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <g stroke="currentColor" stroke-width="1.6">
+          <circle cx="320" cy="320" r="96" opacity=".55"/>
+          <circle cx="320" cy="320" r="178" opacity=".42"/>
+          <circle cx="320" cy="320" r="258" opacity=".3"/>
+          <circle cx="320" cy="320" r="320" opacity=".2"/>
+        </g>
+        <g fill="currentColor" opacity=".6">
+          <circle cx="398" cy="214" r="5"/>
+          <circle cx="272" cy="160" r="3.5"/>
+          <circle cx="208" cy="372" r="4"/>
+          <circle cx="412" cy="452" r="4.5"/>
+        </g>
+        <g class="l-sweep">
+          <line x1="320" y1="320" x2="320" y2="16" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" opacity=".8"/>
+          <circle cx="320" cy="16" r="9" fill="#35e27a"/>
+          <circle cx="320" cy="16" r="16" fill="#35e27a" opacity=".3"/>
+        </g>
+      </svg>
+    </div>
     <div class="wrap">
       <span class="l-eyebrow">Telegram-бот · Беларусь</span>
       <h1>Билеты на любимого артиста<br>появляются — мы пишем первыми</h1>
@@ -648,7 +797,7 @@
      ================================================================ -->
 <div id="app">
 <header>
-  <h1>🎫 Билетный радар</h1>
+  <h1><span class="radar-dot" aria-hidden="true"></span>Билетный радар</h1>
   <div class="sub">24afisha.by · bycard.by · ticketpro.by · bezkassira.by</div>
 </header>
 
@@ -732,7 +881,24 @@
       ' user=' + (tg.initDataUnsafe && tg.initDataUnsafe.user ? 'да' : 'нет');
   }
   console.log('[webapp] diag:', webappDiag());
+
+  // Схема Telegram (light/dark) — от неё зависит читаемый оттенок зелёного
+  // в тексте и обводках. Кладём на <html>, чтобы переключился CSS.
+  function applyScheme() {
+    const scheme = (tg && tg.colorScheme === 'dark') ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-tg-scheme', scheme);
+  }
+  // Брендовая шапка Mini App: тёмно-синий фон из логотипа. Методы есть не во
+  // всех версиях клиента (и не в браузерной заглушке) — глушим ошибки.
+  // Цвет фона не трогаем: его ведёт тема Telegram, а наша <header> уже navy.
+  function applyBrandChrome() {
+    if (!tg || !isWebApp) return;
+    try { if (tg.setHeaderColor) tg.setHeaderColor('#0b1b33'); } catch (e) {}
+  }
+  applyScheme();
+  try { if (tg && tg.onEvent) tg.onEvent('themeChanged', function () { applyScheme(); applyBrandChrome(); }); } catch (e) {}
   if (tg) { try { tg.ready(); if (isWebApp) tg.expand(); } catch (e) {} }
+  applyBrandChrome();
 
   // ---------------------------------------------------------------
   // Ветвление по контексту открытия:
@@ -1011,9 +1177,10 @@
     }
     // Наличие: показываем только когда источник его знает (onSale === true/false).
     // У Афиши и Ticketpro наличие не отдаётся в выдаче, поэтому null → строки нет.
+    // «В продаже» — пульсирующая зелёная точка (мотив развёртки радара из логотипа).
     let avail = '';
-    if (e.onSale === true) avail = '🎟 В продаже';
-    else if (e.onSale === false) avail = '🕒 Ещё не в продаже';
+    if (e.onSale === true) avail = '<div class="meta avail"><span class="dot"></span>В продаже</div>';
+    else if (e.onSale === false) avail = '<div class="meta">🕒 Ещё не в продаже</div>';
     return '<div class="card">' +
       (e.image ? '<img class="thumb" src="' + esc(e.image) + '" alt="" loading="lazy">'
                : '<div class="thumb placeholder">🎫</div>') +
@@ -1021,7 +1188,7 @@
         '<div class="title">' + esc(e.title) + '</div>' +
         '<div class="meta">' + esc(metaParts.join(' · ') || 'Событие') + '</div>' +
         (price ? '<div class="meta">💰 ' + esc(price) + '</div>' : '') +
-        (avail ? '<div class="meta">' + esc(avail) + '</div>' : '') +
+        avail +
         '<div class="actions">' + e.actionsHtml + '</div>' +
       '</div></div>';
   }
