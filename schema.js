@@ -91,6 +91,9 @@ export const notifications = sqliteTable(
 
 // Журнал циклов проверки (для ежедневной статистики): одна строка на выполненный
 // цикл. checked/notified/failed — счётчики позиций, уведомлений и ошибок цикла.
+// Поля budget_* — утилизация бюджетов опроса за цикл (см. lib/budget.js):
+// сколько «деталей» израсходовано/отказано, сколько упёрлось в лимиты площадок
+// и городских проверок. Так в статистике видно, хватает ли бюджета.
 export const checkLog = sqliteTable(
   'check_log',
   {
@@ -100,6 +103,18 @@ export const checkLog = sqliteTable(
     notified: integer('notified').notNull().default(0),
     failed: integer('failed').notNull().default(0),
     durationMs: integer('duration_ms').default(0),
+    detailSpent: integer('detail_spent').default(0),
+    detailDenied: integer('detail_denied').default(0),
+    cityProbes: integer('city_probes').default(0),
+    queryVenuesTried: integer('query_venues_tried').default(0),
+    queryVenuesSkipped: integer('query_venues_skipped').default(0),
+    venueCrawlTruncated: integer('venue_crawl_truncated').default(0),
+    venueCrawlMs: integer('venue_crawl_ms').default(0),
+    venueCrawlRuns: integer('venue_crawl_runs').default(0),
+    venueEventsTruncated: integer('venue_events_truncated').default(0),
+    venueEventsSeen: integer('venue_events_seen').default(0),
+    venueEventsPastSkipped: integer('venue_events_past_skipped').default(0),
+    resultsTruncated: integer('results_truncated').default(0),
   },
   (t) => [
     index('idx_check_log_started').on(t.startedAt),
