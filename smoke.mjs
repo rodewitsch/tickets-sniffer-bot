@@ -20,7 +20,7 @@ const { runMigrations } = await import('./migrate.js');
 const {
   renderWatchlist, itemEmoji, unsubDeepLink, unsubConfirmText, unsubConfirmKeyboard,
 } = await import('./lib/menus.js');
-const { venueCityFromSlug } = await import('./lib/cities.js');
+const { venueCityFromSlug, citySlugFrom, cityLabel } = await import('./lib/cities.js');
 const { matchesQueryTokens, translitRu } = await import('./lib/util.js');
 
 function cleanup() {
@@ -141,6 +141,18 @@ async function main() {
   assert.equal(matchesQueryTokens('Бельведер', 'Belvedere'), true, 'venue name translit match');
   assert.equal(matchesQueryTokens('Театр кукол', 'Театр эстрады'), false, 'venue name false positive rejected');
   assert.equal(translitRu('Молодёжный театр'), 'molodezhnyi teatr', 'translit of venue name');
+
+  // Нормализация города: метка/написание → слаг. Нужна, потому что источники
+  // отдают город по-разному («Минск» у ticketpro/bezkassira, «minsk» у афиши).
+  assert.equal(citySlugFrom('Минск'), 'minsk', 'city label normalized to slug');
+  assert.equal(citySlugFrom('минск'), 'minsk', 'lowercase label normalized');
+  assert.equal(citySlugFrom('Могилёв'), 'mogilev', 'label with ё normalized');
+  assert.equal(citySlugFrom('Могилев'), 'mogilev', 'label without ё normalized');
+  assert.equal(citySlugFrom('minsk'), 'minsk', 'slug passes through');
+  assert.equal(citySlugFrom('all'), 'all', 'service value kept');
+  assert.equal(citySlugFrom(''), null, 'empty city → null');
+  assert.equal(cityLabel('minsk'), 'Минск', 'slug → human label');
+  assert.equal(cityLabel('Минск'), 'Минск', 'label → same label (idempotent)');
 
   console.log('✅ smoke PASS: db works (insert/onConflict/returning/filter/count/update/delete/order) + list render (emoji/links/deep-link) + venue query matching');
 }

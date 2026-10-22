@@ -2,11 +2,20 @@
 // Запуск: node migrate.js
 // Вызывается также при старте server.js.
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
+import { sql } from 'drizzle-orm';
 import { db } from './db.js';
 
 export function runMigrations() {
   migrate(db, { migrationsFolder: './drizzle' });
   console.log('[migrate] applied');
+  // SQLite в WAL-режиме не отдаёт занятое место сам: файл -wal пухнет (в проде
+  // доходило до 4 МБ при 230 КБ самой базы), пока не будет чекпоинта. Делаем его
+  // при старте — оба контейнера (bot, cron) держат базу открытой долго.
+  try {
+    db.run(sql`PRAGMA wal_checkpoint(TRUNCATE)`);
+  } catch (e) {
+    console.warn('[migrate] wal checkpoint skipped:', e && e.message || e);
+  }
 }
 
 // Прямой запуск из CLI.
