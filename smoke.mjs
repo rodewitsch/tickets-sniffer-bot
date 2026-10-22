@@ -1,15 +1,36 @@
 // Локальный smoke-тест слоя БД (Drizzle + better-sqlite3) и чистых хелперов
 // рендера списка (эмодзи/ссылки). Запуск: node smoke.mjs
 import assert from 'node:assert';
-import { count } from 'drizzle-orm';
-import db, { eq, and, desc } from './db.js';
-import { users, events, watchItems } from './schema.js';
-import { runMigrations } from './migrate.js';
-import {
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+// Изоляция БД: тест НИКОГДА не должен трогать рабочий data/bot.db. Если DB_PATH
+// не задан снаружи — подставляем временный файл и удаляем его в конце.
+const ownDb = !process.env.DB_PATH;
+const tempDb = ownDb
+  ? path.join(os.tmpdir(), `smoke-${process.pid}-${Date.now()}.db`)
+  : process.env.DB_PATH;
+process.env.DB_PATH = tempDb;
+
+const { count } = await import('drizzle-orm');
+const { default: db, eq, and, desc } = await import('./db.js');
+const { users, events, watchItems } = await import('./schema.js');
+const { runMigrations } = await import('./migrate.js');
+const {
   renderWatchlist, itemEmoji, unsubDeepLink, unsubConfirmText, unsubConfirmKeyboard,
-} from './lib/menus.js';
-import { venueCityFromSlug } from './lib/cities.js';
-import { matchesQueryTokens, translitRu } from './lib/util.js';
+} = await import('./lib/menus.js');
+const { venueCityFromSlug } = await import('./lib/cities.js');
+const { matchesQueryTokens, translitRu } = await import('./lib/util.js');
+
+function cleanup() {
+  if (!ownDb) return;
+  for (const suffix of ['', '-wal', '-shm']) {
+    try {
+      fs.rmSync(tempDb + suffix, { force: true });
+    } catch { /* файл мог остаться открытым на Windows — не критично */ }
+  }
+}
 
 async function main() {
   // применяем миграции (как migrate), чтобы тест работал на чистой БД
@@ -103,6 +124,13 @@ async function main() {
   // площадки (включая транслит «Бельведер» ↔ «Belvedere»).
   assert.equal(venueCityFromSlug('kinoteatr-mir-brest-brest'), 'brest', 'venue city from slug');
   assert.equal(venueCityFromSlug('158-respublikanskij-teatr-belorusskoj-dramaturgii'), '', 'venue city unknown → empty');
+  // Город — последний сегмент слага. Хвост, лишь похожий на город, городом не считается:
+  // «берёст» (береста) не должен превращаться в brest. Но реальные слаги афиши всегда
+  // заканчиваются именно городом, поэтому позитив остаётся позитивом.
+  assert.equal(venueCityFromSlug('teatr-ne-berest'), '', 'suffix that only looks like a city is rejected');
+  assert.equal(venueCityFromSlug('dom-kultury-berestye'), '', 'no city suffix → empty');
+  assert.equal(venueCityFromSlug('komediya-minsk'), 'minsk', 'city as last segment');
+  assert.equal(venueCityFromSlug('4950-zasluzhennyj-kollektiv-minskiy-oblastnoy-teatr-kukol-batleyka-molodechno'), 'molodechno', 'long slug keeps its own city');
   assert.equal(matchesQueryTokens('РТБД', 'РТБД'), true, 'venue name exact token match');
   assert.equal(matchesQueryTokens('Бельведер', 'Belvedere'), true, 'venue name translit match');
   assert.equal(matchesQueryTokens('Театр кукол', 'Театр эстрады'), false, 'venue name false positive rejected');
@@ -111,4 +139,6 @@ async function main() {
   console.log('✅ smoke PASS: db works (insert/onConflict/returning/filter/count/update/delete/order) + list render (emoji/links/deep-link) + venue query matching');
 }
 
-main().catch((e) => { console.error('✗ smoke FAIL', e); process.exit(1); });
+main()
+  .then(() => { cleanup(); })
+  .catch((e) => { cleanup(); console.error('✗ smoke FAIL', e); process.exit(1); });
