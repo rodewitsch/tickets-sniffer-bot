@@ -8,6 +8,8 @@ import { runMigrations } from './migrate.js';
 import {
   renderWatchlist, itemEmoji, unsubDeepLink, unsubConfirmText, unsubConfirmKeyboard,
 } from './lib/menus.js';
+import { venueCityFromSlug } from './lib/cities.js';
+import { matchesQueryTokens, translitRu } from './lib/util.js';
 
 async function main() {
   // применяем миграции (как migrate), чтобы тест работал на чистой БД
@@ -97,7 +99,16 @@ async function main() {
   assert.equal(confirmKb[0][0].callback_data, 'unsub:yes:5', 'confirm yes callback');
   assert.equal(confirmKb[1][0].callback_data, 'unsub:no:5', 'confirm no callback');
 
-  console.log('✅ smoke PASS: db works (insert/onConflict/returning/filter/count/update/delete/order) + list render (emoji/links/deep-link)');
+  // Поиск по площадкам: город из слага площадки + сверка имени запроса с именем
+  // площадки (включая транслит «Бельведер» ↔ «Belvedere»).
+  assert.equal(venueCityFromSlug('kinoteatr-mir-brest-brest'), 'brest', 'venue city from slug');
+  assert.equal(venueCityFromSlug('158-respublikanskij-teatr-belorusskoj-dramaturgii'), '', 'venue city unknown → empty');
+  assert.equal(matchesQueryTokens('РТБД', 'РТБД'), true, 'venue name exact token match');
+  assert.equal(matchesQueryTokens('Бельведер', 'Belvedere'), true, 'venue name translit match');
+  assert.equal(matchesQueryTokens('Театр кукол', 'Театр эстрады'), false, 'venue name false positive rejected');
+  assert.equal(translitRu('Молодёжный театр'), 'molodezhnyi teatr', 'translit of venue name');
+
+  console.log('✅ smoke PASS: db works (insert/onConflict/returning/filter/count/update/delete/order) + list render (emoji/links/deep-link) + venue query matching');
 }
 
 main().catch((e) => { console.error('✗ smoke FAIL', e); process.exit(1); });
