@@ -14,7 +14,7 @@ const tempDb = ownDb
 process.env.DB_PATH = tempDb;
 
 const { count } = await import('drizzle-orm');
-const { default: db, eq, and, desc } = await import('./db.js');
+const { default: db, sqlite, eq, and, desc } = await import('./db.js');
 const { users, events, watchItems } = await import('./schema.js');
 const { runMigrations } = await import('./migrate.js');
 const {
@@ -25,10 +25,16 @@ const { matchesQueryTokens, translitRu } = await import('./lib/util.js');
 
 function cleanup() {
   if (!ownDb) return;
+  // better-sqlite3 держит файл открытым до close(): без этого rmSync на Windows
+  // молча падает с EBUSY и временные БД копятся в %TEMP%.
+  try { sqlite.close(); } catch { /* уже закрыта */ }
   for (const suffix of ['', '-wal', '-shm']) {
     try {
       fs.rmSync(tempDb + suffix, { force: true });
-    } catch { /* файл мог остаться открытым на Windows — не критично */ }
+    } catch { /* не критично для результата теста */ }
+  }
+  if (fs.existsSync(tempDb)) {
+    console.warn(`⚠ временная БД не удалена (файл занят): ${tempDb}`);
   }
 }
 
