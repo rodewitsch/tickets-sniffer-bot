@@ -22,6 +22,7 @@ const {
 } = await import('./lib/menus.js');
 const { venueCityFromSlug, citySlugFrom, cityLabel } = await import('./lib/cities.js');
 const { matchesQueryTokens, translitRu } = await import('./lib/util.js');
+const { reportPeriodEndSec, msUntilNextMinsk } = await import('./lib/stats.js');
 
 function cleanup() {
   if (!ownDb) return;
@@ -153,6 +154,15 @@ async function main() {
   assert.equal(citySlugFrom(''), null, 'empty city → null');
   assert.equal(cityLabel('minsk'), 'Минск', 'slug → human label');
   assert.equal(cityLabel('Минск'), 'Минск', 'label → same label (idempotent)');
+
+  // Окно ежедневного отчёта: сутки ДО 09:00 по Минску, а не календарные сутки.
+  // 09:00 Минска = 06:00 UTC.
+  const at = (iso) => reportPeriodEndSec(Date.parse(iso));
+  assert.equal(at('2026-10-22T12:00:00Z'), Date.parse('2026-10-22T06:00:00Z') / 1000, 'after send time → today 09:00');
+  assert.equal(at('2026-10-22T06:00:00Z'), Date.parse('2026-10-22T06:00:00Z') / 1000, 'exactly at send time → today 09:00');
+  assert.equal(at('2026-10-22T03:00:00Z'), Date.parse('2026-10-21T06:00:00Z') / 1000, 'before send time → yesterday 09:00');
+  assert.equal(at('2026-10-22T05:59:59Z'), Date.parse('2026-10-21T06:00:00Z') / 1000, 'one second before → yesterday 09:00');
+  assert.equal(msUntilNextMinsk(9, 0, Date.parse('2026-10-22T05:00:00Z')), 3600 * 1000, 'next send in 1h');
 
   console.log('✅ smoke PASS: db works (insert/onConflict/returning/filter/count/update/delete/order) + list render (emoji/links/deep-link) + venue query matching');
 }
