@@ -1,0 +1,55 @@
+name: Sync wiki
+
+# Зеркалит документацию из репозитория в GitHub Wiki.
+# GitHub Wiki — отдельный git-репозиторий (<repo>.wiki.git), файлы из docs/
+# туда сами не попадают. Этот workflow копирует их при изменении на main.
+#
+# Источники:
+#   docs/wiki-how-it-works.md → «Как-работает-бот»
+#
+# Запуск: автоматически при push в main (изменения этих файлов) или вручную.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/wiki-how-it-works.md'
+      - '.github/workflows/wiki.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wiki
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Clone wiki
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.wiki.git" wiki
+          git -C wiki config user.name "github-actions[bot]"
+          git -C wiki config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Copy pages
+        run: |
+          cp docs/wiki-how-it-works.md "wiki/Как-работает-бот.md"
+
+      - name: Commit and push
+        run: |
+          cd wiki
+          if git diff --quiet && git diff --cached --quiet; then
+            echo "wiki is up to date"
+            exit 0
+          fi
+          git add -A
+          git commit -m "docs: sync wiki from ${{ github.sha }}"
+          git push
