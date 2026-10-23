@@ -42,6 +42,10 @@ jobs:
       - name: Copy pages
         run: |
           cp docs/wiki-how-it-works.md "wiki/Как-работает-бот.md"
+          # Диагностика: если файл не появился/не отличается, шаг коммита молча
+          # завершится «up to date» и синхронизация будет выглядеть успешной.
+          ls -la wiki
+          git -C wiki status --porcelain
 
       - name: Commit and push
         run: |
@@ -55,3 +59,4 @@ jobs:
           git add -A
           git commit -m "docs: sync wiki from ${{ github.sha }}"
           git push
+          git log --oneline -1
