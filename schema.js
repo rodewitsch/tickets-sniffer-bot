@@ -105,10 +105,20 @@ export const checkLog = sqliteTable(
     durationMs: integer('duration_ms').default(0),
     detailSpent: integer('detail_spent').default(0),
     detailDenied: integer('detail_denied').default(0),
+    // Городские проверки: сколько запросов к городам сделано (cityProbes), сколько
+    // позиций-событий ими проверено (cityChecks) и максимум на одну позицию.
     cityProbes: integer('city_probes').default(0),
+    cityChecks: integer('city_checks').default(0),
+    cityProbesMax: integer('city_probes_max').default(0),
     queryVenuesTried: integer('query_venues_tried').default(0),
     queryVenuesSkipped: integer('query_venues_skipped').default(0),
+    // Сколько раз в поиске нашлось >= MAX_VENUE_RESULTS_PER_QUERY площадок.
+    venueQuotaHit: integer('venue_quota_hit').default(0),
+    // Обход площадок прерван: всего / по времени / из-за бюджета; сколько отложено.
     venueCrawlTruncated: integer('venue_crawl_truncated').default(0),
+    venueCrawlTimeTruncated: integer('venue_crawl_time_truncated').default(0),
+    venueCrawlBudgetTruncated: integer('venue_crawl_budget_truncated').default(0),
+    venueCrawlDeferred: integer('venue_crawl_deferred').default(0),
     venueCrawlMs: integer('venue_crawl_ms').default(0),
     venueCrawlRuns: integer('venue_crawl_runs').default(0),
     venueEventsTruncated: integer('venue_events_truncated').default(0),

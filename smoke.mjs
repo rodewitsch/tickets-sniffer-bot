@@ -15,14 +15,15 @@ process.env.DB_PATH = tempDb;
 
 const { count } = await import('drizzle-orm');
 const { default: db, sqlite, eq, and, desc } = await import('./db.js');
-const { users, events, watchItems } = await import('./schema.js');
+const { users, events, watchItems, checkLog } = await import('./schema.js');
 const { runMigrations } = await import('./migrate.js');
 const {
   renderWatchlist, itemEmoji, unsubDeepLink, unsubConfirmText, unsubConfirmKeyboard,
 } = await import('./lib/menus.js');
 const { venueCityFromSlug, citySlugFrom, cityLabel } = await import('./lib/cities.js');
 const { matchesQueryTokens, translitRu } = await import('./lib/util.js');
-const { reportPeriodEndSec, msUntilNextMinsk } = await import('./lib/stats.js');
+const { reportPeriodEndSec, msUntilNextMinsk, formatReport } = await import('./lib/stats.js');
+const { record, resetBudgetStats, snapshotBudgetStats } = await import('./lib/budget.js');
 
 function cleanup() {
   if (!ownDb) return;
@@ -164,7 +165,69 @@ async function main() {
   assert.equal(at('2026-10-22T05:59:59Z'), Date.parse('2026-10-21T06:00:00Z') / 1000, 'one second before → yesterday 09:00');
   assert.equal(msUntilNextMinsk(9, 0, Date.parse('2026-10-22T05:00:00Z')), 3600 * 1000, 'next send in 1h');
 
-  console.log('✅ smoke PASS: db works (insert/onConflict/returning/filter/count/update/delete/order) + list render (emoji/links/deep-link) + venue query matching');
+  // Бюджеты опроса: причины прерывания обхода площадок считаются раздельно,
+  // а городские проверки считают реальные запросы к городам, а не позиции.
+  resetBudgetStats();
+  record.cityProbe(3);   // 3 города в одной проверке
+  record.cityProbe(0);   // проверка без числового id — городов не опрошено
+  record.venueCrawlTruncated('budget');
+  record.venueCrawlDeferred();
+  record.venueCrawlTruncated('time');
+  record.venueQuotaHit();
+  const usage = snapshotBudgetStats();
+  assert.equal(usage.cityProbes, 3, 'cityProbes counts real city requests');
+  assert.equal(usage.cityChecks, 2, 'cityChecks counts event checks');
+  assert.equal(usage.cityProbesMax, 3, 'cityProbesMax is the busiest single check');
+  assert.equal(usage.venueCrawlTimeTruncated, 1, 'time truncation counted separately');
+  assert.equal(usage.venueCrawlBudgetTruncated, 1, 'budget truncation counted separately');
+  assert.equal(usage.venueCrawlTruncated, 2, 'total truncation kept for compatibility');
+  assert.equal(usage.venueCrawlDeferred, 1, 'deferred candidates counted');
+
+  // check_log: новые колонки пишутся и читаются (миграция 0006).
+  await db.insert(checkLog).values({
+    checked: 5, cityProbes: 3, cityChecks: 2, cityProbesMax: 3, venueQuotaHit: 1,
+    venueCrawlTruncated: 2, venueCrawlTimeTruncated: 1, venueCrawlBudgetTruncated: 1,
+    venueCrawlDeferred: 1,
+  }).run();
+  const logRow = await db.select().from(checkLog).orderBy(desc(checkLog.id)).get();
+  assert.equal(logRow.cityProbesMax, 3, 'city_probes_max persisted');
+  assert.equal(logRow.venueCrawlBudgetTruncated, 1, 'venue_crawl_budget_truncated persisted');
+  assert.equal(logRow.venueQuotaHit, 1, 'venue_quota_hit persisted');
+
+  // Отчёт: разбивка «в продаже» — по источникам, а не все события кэша; обход
+  // площадок, прерванный по бюджету, не выдаёт себя за прерывание по времени.
+  const report = formatReport({
+    date: '23 октября 2026',
+    period: { label: '22.10 09:00 — 23.10 09:00' },
+    users: { total: 1, newToday: 0, active24h: 1, active7d: 1 },
+    watch: { total: 1, newToday: 0, byKind: {}, bySource: {} },
+    events: {
+      total: 4, newToday: 0, onSale: 2,
+      onSaleBySource: { afisha: 1, ticketpro: 1 }, bySource: { afisha: 3, ticketpro: 1 },
+    },
+    notif: { today: 0, d7: 0, total: 0 },
+    checks: {
+      today: 1, items: 5, notified: 0, failed: 0, lastAt: 0,
+      budget: {
+        cycles: 1, items: 5, perCycleItems: 5,
+        budget: { limit: 12, venueReserve: 4, venueLimit: 8 },
+        detail: { limit: 12, spentAvg: 6, pct: 50, deniedCycles: 0, denied: 0 },
+        city: { limit: 10, total: 3, checks: 2, perCheck: 1.5, max: 3, avg: 3, saturated: 0 },
+        venues: { perQuery: 3, eventsLimit: 40, tried: 1, skipped: 2, quotaHit: 0, eventsTruncated: 0, resultsTruncated: 0 },
+        crawl: {
+          budgetMs: 20000, runs: 1, avgMs: 0, truncated: 2,
+          timeTruncated: 1, budgetTruncated: 1, deferred: 1, pct: 0,
+        },
+      },
+    },
+  });
+  assert.ok(report.includes('В продаже сейчас: <b>2</b> (Афиша 1, Ticketpro 1, BezKassira 0)'), 'on-sale breakdown uses on-sale events');
+  assert.ok(report.includes('1.5 города на проверку'), 'city probes per check shown');
+  assert.ok(report.includes('по времени прерван 1 раз'), 'time truncation shown honestly');
+  assert.ok(report.includes('обход прерван из-за бюджета 1 раз (1 отложено)'), 'budget truncation shown separately');
+  assert.ok(report.includes('(обычные 8 + площадки 4)'), 'budget split shown');
+
+  console.log('✅ smoke PASS: db works (insert/onConflict/returning/filter/count/update/delete/order) + list render (emoji/links/deep-link) + venue query matching + budget counters + stats report');
 }
 
 main()
