@@ -125,6 +125,16 @@ export const checkLog = sqliteTable(
     venueEventsSeen: integer('venue_events_seen').default(0),
     venueEventsPastSkipped: integer('venue_events_past_skipped').default(0),
     resultsTruncated: integer('results_truncated').default(0),
+    // Кэш поиска: попадания (сэкономленные запросы к сайтам), промахи и
+    // «присоединения» к уже идущему запросу (см. lib/search-cache.js).
+    searchCacheHits: integer('search_cache_hits').default(0),
+    searchCacheMisses: integer('search_cache_misses').default(0),
+    searchCacheJoins: integer('search_cache_joins').default(0),
+    // События, не перечитывавшиеся, т.к. не в продаже и стартуют позже горизонта
+    // предпродажи (см. RECHECK_PRESALE_HORIZON_DAYS).
+    presaleSkipped: integer('presale_skipped').default(0),
+    // Отказы в бюджете из-за лимита НА ЧАТ (а не общего исчерпания цикла).
+    perChatDenied: integer('per_chat_denied').default(0),
   },
   (t) => [
     index('idx_check_log_started').on(t.startedAt),
