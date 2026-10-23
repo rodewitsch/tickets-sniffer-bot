@@ -63,7 +63,9 @@ Telegram-бот следит за билетными сайтами и прис�
 ---
 
 *Для разработчиков:* как всё устроено, как поднять собственного бота и запустить
-проект локально — в [`docs/DEPLOY_DROPLET.md`](docs/DEPLOY_DROPLET.md) (деплой на сервер)
+проект локально — в [`docs/wiki-how-it-works.md`](docs/wiki-how-it-works.md)
+(принцип работы: расписание опроса, бюджеты, уведомления),
+[`docs/DEPLOY_DROPLET.md`](docs/DEPLOY_DROPLET.md) (деплой на сервер)
 и [`docs/SERVER_GUIDE.md`](docs/SERVER_GUIDE.md) (структура, разработка и серверные рецепты).
 
 <br>
