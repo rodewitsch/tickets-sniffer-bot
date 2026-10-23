@@ -37,6 +37,15 @@ export const watchItems = sqliteTable(
     image: text('image'),
     active: integer('active', { mode: 'boolean' }).default(true),
     createdAt: integer('created_at').default(sql`(unixepoch())`),
+    // Последний цикл, в котором позиция реально проверялась (unix-секунды).
+    // Нужно для справедливого планирования: порядок обхода — по «долгу» позиции
+    // (сколько циклов её откладывали), а не по давности данных её события.
+    // NULL — позиция ещё ни разу не проверялась (идёт в первую очередь).
+    lastCheckedAt: integer('last_checked_at'),
+    // Сколько циклов подряд позицию откладывали из-за бюджета. Каждый пропуск
+    // повышает приоритет, успешная проверка сбрасывает в 0. Благодаря этому
+    // «голодная» позиция дождётся бюджета, даже если у соседа больше позиций.
+    deferStreak: integer('defer_streak').default(0),
   },
   (t) => [
     index('idx_watch_chat').on(t.chatId, t.active),
