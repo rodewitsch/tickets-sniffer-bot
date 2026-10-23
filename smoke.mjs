@@ -182,14 +182,14 @@ async function main() {
   // а городские проверки считают реальные запросы к городам, а не позиции.
   resetBudgetStats();
   record.cityProbe(3);   // 3 города в одной проверке
-  record.cityProbe(0);   // проверка без числового id — городов не опрошено
+  record.cityProbe(0);   // проверка без числового id — городов не опрошено (не считается)
   record.venueCrawlTruncated('budget');
   record.venueCrawlDeferred();
   record.venueCrawlTruncated('time');
   record.venueQuotaHit();
   const usage = snapshotBudgetStats();
   assert.equal(usage.cityProbes, 3, 'cityProbes counts real city requests');
-  assert.equal(usage.cityChecks, 2, 'cityChecks counts event checks');
+  assert.equal(usage.cityChecks, 1, 'empty probe is not a city check');
   assert.equal(usage.cityProbesMax, 3, 'cityProbesMax is the busiest single check');
   assert.equal(usage.venueCrawlTimeTruncated, 1, 'time truncation counted separately');
   assert.equal(usage.venueCrawlBudgetTruncated, 1, 'budget truncation counted separately');
