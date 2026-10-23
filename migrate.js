@@ -1,6 +1,7 @@
 // Применение миграций БД (drizzle-kit генерирует SQL в drizzle/, здесь применяем).
 // Запуск: node migrate.js
-// Вызывается также при старте server.js.
+// Вызывается при старте server.js И cron.js: оба процесса пишут в базу, и ни один
+// не должен зависеть от того, успел ли соседний контейнер обновить схему.
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { sql } from 'drizzle-orm';
 import { db } from './db.js';

@@ -41,8 +41,21 @@ function cleanup() {
 }
 
 async function main() {
-  // применяем миграции (как migrate), чтобы тест работал на чистой БД
+  // Регрессия прода: cron пишет в check_log, но миграции применял только
+  // server.js. Вставка в «старую» схему падала молча (ошибка шла в лог), и циклы
+  // сутками не логировались. Теперь миграции запускает и cron.js, а вызов должен
+  // быть идемпотентным — контейнеры стартуют независимо и оба его делают.
   runMigrations();
+  runMigrations();
+
+  // Схема после миграций содержит все колонки, которые пишет чекер (cron).
+  const cols = sqlite.prepare('PRAGMA table_info(check_log)').all().map((c) => c.name);
+  for (const col of [
+    'city_checks', 'city_probes_max', 'venue_quota_hit',
+    'venue_crawl_time_truncated', 'venue_crawl_budget_truncated', 'venue_crawl_deferred',
+  ]) {
+    assert.ok(cols.includes(col), `check_log has ${col} after migrations`);
+  }
 
   // users: insert + onConflictDoUpdate
   await db.insert(users).values({ chatId: 1, username: 'a', firstName: 'A' })

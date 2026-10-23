@@ -7,6 +7,17 @@
 import { runCheck } from './lib/checker.js';
 import { sendDailyStats, msUntilNextMinsk, minskParts } from './lib/stats.js';
 import { STATS_SEND_HOUR, STATS_SEND_MINUTE } from './lib/config.js';
+import { runMigrations } from './migrate.js';
+
+// Миграции при старте. Раньше их применял только server.js, а cron запускается
+// отдельным контейнером и писал в check_log раньше, чем bot успевал обновить
+// схему: новые колонки отсутствовали, insert падал, цикл не логировался.
+// cron не должен зависеть от порядка старта соседнего контейнера.
+try {
+  runMigrations();
+} catch (err) {
+  console.error('[cron] migrate on startup failed:', err && err.message || err);
+}
 
 const DAY_START = 9;                     // начало «дня», час (включительно)
 const DAY_END = 21;                      // конец «дня», час (не включительно)
