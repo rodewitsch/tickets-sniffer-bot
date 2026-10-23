@@ -264,3 +264,5 @@ flowchart LR
 - `docs/SERVER_GUIDE.md` — сервер, логи, БД, рецепты.
 - `docs/DEPLOY_DROPLET.md` — деплой на Droplet.
 - `AGENTS.md` — правила разработки в проекте.
+
+<!-- sync test -->
