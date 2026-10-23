@@ -39,9 +39,23 @@ services:
     environment:
       DB_PATH: /data/bot.db
       TZ: Europe/Minsk
+      # Детальность логов цикла (см. lib/checker-log.js):
+      #   summary — одна строка check.summary на цикл (по умолчанию)
+      #   items   — плюс строка на каждую позицию (исход/время)
+      #   debug   — плюс причина каждого пропуска
+      # CHECK_LOG_ITEMS=1 включает построчные логи даже на уровне summary.
+      CHECK_LOG_LEVEL: ${CHECK_LOG_LEVEL:-summary}
+      SLOW_ITEM_MS: ${SLOW_ITEM_MS:-10000}
     volumes:
       - tickets-data:/data
     command: ["node", "cron.js"]
+    # Логи не должны расти бесконечно: cron пишет строку на цикл (и больше при
+    # CHECK_LOG_LEVEL=items). Docker ротирует их по этим лимитам.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   web:
     image: caddy:2-alpine

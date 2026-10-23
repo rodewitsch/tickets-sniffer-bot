@@ -135,6 +135,12 @@ export const checkLog = sqliteTable(
     presaleSkipped: integer('presale_skipped').default(0),
     // Отказы в бюджете из-за лимита НА ЧАТ (а не общего исчерпания цикла).
     perChatDenied: integer('per_chat_denied').default(0),
+    // Исходы проверки позиций — ответ на «почему позиция ничего не проверила».
+    skippedFresh: integer('skipped_fresh').default(0),
+    noBudget: integer('no_budget').default(0),
+    emptyResult: integer('empty_result').default(0),
+    notOnSale: integer('not_on_sale').default(0),
+    errorItems: integer('error_items').default(0),
   },
   (t) => [
     index('idx_check_log_started').on(t.startedAt),
