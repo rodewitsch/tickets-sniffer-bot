@@ -19,10 +19,16 @@ try {
   console.error('[cron] migrate on startup failed:', err && err.message || err);
 }
 
+// Интервалы опроса. Бот должен ловить старт продаж РАНЬШЕ пользователя,
+// поэтому днём опрос частый; ночью (когда всё спят и сайты не обновляют)
+// реже — это ещё и защита от бан-фильтров.
 const DAY_START = 9;                     // начало «дня», час (включительно)
 const DAY_END = 21;                      // конец «дня», час (не включительно)
-const DAY_MIN = 15, DAY_MAX = 30;        // границы интервала днём (минуты)
-const NIGHT_MIN = 60, NIGHT_MAX = 120;   // границы интервала ночью (минуты)
+const DAY_MIN = 5, DAY_MAX = 10;         // днём: 5–10 минут
+const PEAK_START = 17;                   // вечерний пик (после работы) — 17:00
+const PEAK_END = 21;                     // до 21:00
+const PEAK_MIN = 3, PEAK_MAX = 6;        // в пик: 3–6 минут
+const NIGHT_MIN = 30, NIGHT_MAX = 60;    // ночью: 30–60 минут
 
 // Случайная задержка до следующего цикла в зависимости от текущего часа Минска.
 // Используем minskParts().hour (Intl, TZ-aware), а не new Date().getHours():
@@ -30,9 +36,20 @@ const NIGHT_MIN = 60, NIGHT_MAX = 120;   // границы интервала н
 // 15–30 мин превратился бы в ночной 60–120 мин.
 function nextDelayMinutes() {
   const h = minskParts().hour;
-  const isDay = h >= DAY_START && h < DAY_END;
-  const [lo, hi] = isDay ? [DAY_MIN, DAY_MAX] : [NIGHT_MIN, NIGHT_MAX];
-  return Math.round(lo + Math.random() * (hi - lo));
+  let lo;
+  let hi;
+  let label;
+  if (h >= PEAK_START && h < PEAK_END) {
+    [lo, hi] = [PEAK_MIN, PEAK_MAX];
+    label = 'peak';
+  } else if (h >= DAY_START && h < DAY_END) {
+    [lo, hi] = [DAY_MIN, DAY_MAX];
+    label = 'day';
+  } else {
+    [lo, hi] = [NIGHT_MIN, NIGHT_MAX];
+    label = 'night';
+  }
+  return { minutes: Math.round(lo + Math.random() * (hi - lo)), label };
 }
 
 async function tick() {
@@ -47,13 +64,13 @@ async function tick() {
 }
 
 function scheduleNext() {
-  const mins = nextDelayMinutes();
-  const ms = mins * 60 * 1000;
-  console.log(`[cron] next check in ${mins} min (at ${new Date(Date.now() + ms).toISOString()})`);
+  const { minutes, label } = nextDelayMinutes();
+  const ms = minutes * 60 * 1000;
+  console.log(`[cron] next check in ${minutes} min (${label}) at ${new Date(Date.now() + ms).toISOString()}`);
   setTimeout(tick, ms);
 }
 
-console.log('[cron] starting with randomized interval (day 9-21: 15-30 min, night: 60-120 min)');
+console.log('[cron] starting (peak 3-6 min, day 5-10 min, night 30-60 min)');
 // сразу запускаем первый цикл, дальше — по случайному таймеру
 tick();
 
