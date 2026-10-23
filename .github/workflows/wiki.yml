@@ -46,7 +46,9 @@ jobs:
       - name: Commit and push
         run: |
           cd wiki
-          if git diff --quiet && git diff --cached --quiet; then
+          # ВАЖНО: `git diff --quiet` смотрит только отслеживаемые файлы,
+          # поэтому проверяем статус целиком через git status --porcelain.
+          if [ -z "$(git status --porcelain)" ]; then
             echo "wiki is up to date"
             exit 0
           fi
