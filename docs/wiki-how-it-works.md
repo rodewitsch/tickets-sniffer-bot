@@ -265,4 +265,3 @@ flowchart LR
 - `docs/DEPLOY_DROPLET.md` — деплой на Droplet.
 - `AGENTS.md` — правила разработки в проекте.
 
-<!-- sync test -->
