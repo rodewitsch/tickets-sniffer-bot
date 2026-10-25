@@ -73,8 +73,30 @@ const left = await db.select().from((await import('../schema.js')).venueQueue).a
 ok(left.every((r) => r.watchItemId === item.id), 'prune drops rows of removed items');
 ok(left.length === 2, `prune kept ${left.length} rows for active item`);
 
-// 7. venueIntervalMs — срочность (проверяем через конфиг, функция внутренняя;
-//    здесь достаточно косвенной проверки: dueAt после обхода > now).
+// 7. РЕГРЕССИЯ: slug площадки из bycard-ссылки. Раньше парсер понимал только
+//    /ru/object/<slug> и /ru/<city>/events/<slug>, поэтому bycard-ссылки
+//    (их строит venueUrlByCard) давали пустой slug → fetchAfishaVenueEvents
+//    молча возвращал venue=null, и площадка навсегда оставалась failing.
+//    В проде так залипли 9 записей очереди.
+const { afishaVenueSlugFromUrl } = await import('../lib/sources/afisha.js');
+const SLUG = '158-respublikanskij-teatr-belorusskoj-dramaturgii';
+ok(afishaVenueSlugFromUrl(`https://bycard.by/afisha/minsk/venues/${SLUG}`) === SLUG, 'slug from bycard venue url');
+ok(afishaVenueSlugFromUrl(`https://24afisha.by/ru/object/${SLUG}`) === SLUG, 'slug from /ru/object/ url');
+ok(afishaVenueSlugFromUrl('https://24afisha.by/ru/minsk/events/old-slug') === 'old-slug', 'slug from legacy url');
+ok(afishaVenueSlugFromUrl('https://example.com/nope') === '', 'slug empty for unknown url');
+
+// 8. РЕГРЕССИЯ: failVenue не должен уезжать на +41 день. VENUE_QUERY_RECHECK_MS
+//    измеряется в миллисекундах, а dueAt — в секундах; передача «как есть»
+//    отправляла запись на now + 3.6 млн секунд.
+const { VENUE_QUERY_RECHECK_MS } = await import('../lib/config.js');
+const failRow = await q.enqueueVenue({ watchItemId: item.id, chatId: 1, venue: { uid: 'fail-test', url: 'https://x/fail-test', name: 'fail' }, dueAt: now() });
+ok(failRow === true, 'enqueue row for fail test');
+const failId = (await db.select().from((await import('../schema.js')).venueQueue).all()).find((r) => r.slug === 'fail-test').id;
+await q.failVenue(failId, { dueAt: now() + Math.round(VENUE_QUERY_RECHECK_MS / 1000), attempts: 1 });
+const failAfter = (await db.select().from((await import('../schema.js')).venueQueue).all()).find((r) => r.id === failId);
+const failDelay = failAfter.dueAt - now();
+ok(failDelay > 0 && failDelay < 13 * 3600, `fail backoff in hours, not days (got ${Math.round(failDelay / 60)} min)`);
+
 console.log('\n' + (fails ? `${fails} FAILED` : 'ALL PASSED'));
 // Соединение better-sqlite3 держит файл — закрываем перед удалением (в Windows
 // иначе EBUSY).
