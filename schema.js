@@ -127,6 +127,9 @@ export const checkLog = sqliteTable(
     venueQueueWaiting: integer('venue_queue_waiting').default(0),
     venueQueueCrawled: integer('venue_queue_crawled').default(0),
     venueQueueFailed: integer('venue_queue_failed').default(0),
+    // Добор площадок заранее и откладывание из-за бюджета (курсор сохранён).
+    venueQueueEarly: integer('venue_queue_early').default(0),
+    venueQueueDeferred: integer('venue_queue_deferred').default(0),
     // Сколько раз в поиске нашлось >= MAX_VENUE_RESULTS_PER_QUERY площадок.
     venueQuotaHit: integer('venue_quota_hit').default(0),
     // Обход площадок прерван: всего / по времени / из-за бюджета; сколько отложено.
