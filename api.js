@@ -3,6 +3,11 @@
 // возвращает unwrapped result и бросает BotApiError при неудаче.
 import { BOT_TOKEN, API_HOST } from './env.js';
 
+// Таймаут одного вызова Bot API. Отправка уведомления — не критичный по времени
+// шаг, но БЕЗ таймаута зависшее TCP-соединение останавливало цикл проверки:
+// fetch в Node не имеет собственного таймаута и ждёт ответа бесконечно.
+const API_TIMEOUT_MS = Number(process.env.API_TIMEOUT_MS || 15000);
+
 export class BotApiError extends Error {
   constructor(code, description, method, parameters) {
     super(`${method}: ${description} (${code})`);
@@ -21,10 +26,15 @@ async function call(method, params) {
   const url = `https://${API_HOST}/bot${BOT_TOKEN}/${method}`;
   let res;
   try {
+    // Таймаут обязателен: без него зависший запрос к Telegram останавливал весь
+    // цикл проверки НАВСЕГДА (в проде так висело по 5+ минут: цикл успевал
+    // обойти позиции, а затем застревал на отправке уведомления). AbortSignal
+    // рвёт соединение, ошибка уходит в обычный catch ниже.
     res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params || {}),
+      signal: AbortSignal.timeout(API_TIMEOUT_MS),
     });
   } catch (err) {
     throw new BotApiError(0, String(err && err.message ? err.message : err), method, null);
