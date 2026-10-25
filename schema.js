@@ -121,6 +121,12 @@ export const checkLog = sqliteTable(
     cityProbesMax: integer('city_probes_max').default(0),
     queryVenuesTried: integer('query_venues_tried').default(0),
     queryVenuesSkipped: integer('query_venues_skipped').default(0),
+    // Очередь площадок (venue_queue): поставлено за цикл, сколько ждало обхода,
+    // сколько реально обошли и сколько записей оказались «битыми» (отложены).
+    venueQueued: integer('venue_queued').default(0),
+    venueQueueWaiting: integer('venue_queue_waiting').default(0),
+    venueQueueCrawled: integer('venue_queue_crawled').default(0),
+    venueQueueFailed: integer('venue_queue_failed').default(0),
     // Сколько раз в поиске нашлось >= MAX_VENUE_RESULTS_PER_QUERY площадок.
     venueQuotaHit: integer('venue_quota_hit').default(0),
     // Обход площадок прерван: всего / по времени / из-за бюджета; сколько отложено.
@@ -161,3 +167,43 @@ export const meta = sqliteTable('meta', {
   key: text('key').primaryKey(),
   value: text('value'),
 });
+
+// Очередь площадок, найденных ПОИСКОМ по ключевому слову (не путать с позициями
+// kind='venue' — те пользователь добавил сам и они лежат в watch_items).
+//
+// Зачем очередь: раньше кандидаты жили только внутри одного вызова
+// notifyFromAfishaVenues. Площадку, которую отложил троттлинг
+// (VENUE_QUERY_RECHECK_MS) или срезал MAX_VENUE_RESULTS_PER_QUERY, приходилось
+// искать заново на следующем цикле — и она снова могла не попасть в тройку.
+// В проде это давало 1296 «пропущено по троттлингу» против 85 реальных обходов.
+// Теперь найденная площадка кладётся сюда с dueAt и обходится в свой срок.
+//
+// dueAt — когда площадку можно обходить снова (unix-секунды). Растёт тратами:
+// обход (обновили события) → +interval; троттлинг/бюджет → +backoff.
+// cursor — сколько событий площадки уже обойдено за последний обход: позволяет
+// продолжать длинную сетку с того же места, а не проверять первые MAX_VENUE_EVENTS.
+export const venueQueue = sqliteTable(
+  'venue_queue',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    // Позиция-ключевик, из поиска которой нашлась площадка.
+    watchItemId: integer('watch_item_id').notNull(),
+    // Чат-получатель уведомлений (= watch_items.chat_id на момент постановки).
+    chatId: integer('chat_id').notNull(),
+    slug: text('slug').notNull(),
+    url: text('url').notNull(),
+    title: text('title'),
+    // Ссылка вела на 404/не открывалась — повторим позже, но с backoff.
+    failing: integer('failing', { mode: 'boolean' }).default(false),
+    cursor: integer('cursor').default(0),
+    // С какого момента площадку можно обходить (unix-секунды).
+    dueAt: integer('due_at').notNull().default(0),
+    // Последний реальный обход (для статистики «сколько площадок ждут»).
+    lastCrawledAt: integer('last_crawled_at'),
+    createdAt: integer('created_at').default(sql`(unixepoch())`),
+  },
+  (t) => [
+    uniqueIndex('uidx_venue_queue_item_slug').on(t.watchItemId, t.slug),
+    index('idx_venue_queue_due').on(t.dueAt),
+  ],
+);
