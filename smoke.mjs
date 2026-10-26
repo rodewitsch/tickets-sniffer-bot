@@ -240,7 +240,50 @@ async function main() {
   assert.ok(report.includes('обход прерван из-за бюджета 1 раз (1 отложено)'), 'budget truncation shown separately');
   assert.ok(report.includes('(обычные 8 + площадки 4)'), 'budget split shown');
 
-  console.log('✅ smoke PASS: db works (insert/onConflict/returning/filter/count/update/delete/order) + list render (emoji/links/deep-link) + venue query matching + budget counters + stats report');
+  // Блок «Здоровье»: появляется при наличии циклов и даёт оценку, а не сырые
+  // числа. Проверяем и «здоровый», и «проблемный» случай — иконка должна
+  // меняться, иначе блок бесполезен.
+  const healthBase = {
+    date: '23 октября 2026',
+    period: { label: '22.10 09:00 — 23.10 09:00' },
+    users: { total: 1, newToday: 0, active24h: 1, active7d: 1 },
+    watch: { total: 1, newToday: 0, byKind: {}, bySource: {} },
+    events: { total: 1, newToday: 0, onSale: 1, onSaleBySource: {}, bySource: {} },
+    notif: { today: 0, d7: 0, total: 0 },
+    checks: {
+      today: 10, items: 5, notified: 0, failed: 0, lastAt: 0,
+      health: {
+        cycles: 10, avgMs: 90000, medianMs: 28000, maxMs: 424000, slowCycles: 5,
+        failed: 0, prevFailed: 2, venueSkipped: 713, prevVenueSkipped: 1296,
+        venueTried: 297, venueFailed: 13, crawlPct: 1, crawlTruncated: 5,
+        budgetPct: 35, lastAgeMin: 1,
+      },
+      budget: { cycles: 0 },
+    },
+  };
+  const healthy = formatReport(healthBase);
+  assert.ok(healthy.includes('🩺 <b>Здоровье</b>'), 'health block rendered');
+  assert.ok(healthy.includes('Ошибки позиций ✅ — 0 за сутки (было 2)'), 'errors compared with yesterday');
+  assert.ok(healthy.includes('медиана 28 с'), 'cycle time uses median, not outlier-heavy average');
+  assert.ok(healthy.includes('297 обходов (было 1296 — стало лучше)'), 'crawl trend shown');
+  assert.ok(healthy.includes('битых площадок: 13'), 'broken venues flagged');
+
+  const sick = formatReport({
+    ...healthBase,
+    checks: {
+      ...healthBase.checks,
+      health: { ...healthBase.checks.health, failed: 12, medianMs: 240000, venueTried: 0, lastAgeMin: 999 },
+    },
+  });
+  assert.ok(sick.includes('Ошибки позиций 🔴'), 'many errors downgrade to red');
+  assert.ok(sick.includes('Длительность цикла 🔴'), 'slow cycles downgrade to red');
+  assert.ok(sick.includes('Обход площадок 🔴'), 'no crawls downgrade to red');
+
+  // Без циклов блок не печатается (свежая БД / первый запуск).
+  const empty = formatReport({ ...healthBase, checks: { ...healthBase.checks, health: { cycles: 0 } } });
+  assert.ok(!empty.includes('🩺'), 'health block hidden without cycles');
+
+  console.log('✅ smoke PASS: db works (insert/onConflict/returning/filter/count/update/delete/order) + list render (emoji/links/deep-link) + venue query matching + budget counters + stats report + health block');
 }
 
 main()
