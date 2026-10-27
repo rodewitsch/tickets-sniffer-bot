@@ -72,18 +72,7 @@ Compose (`bot`, `cron`, `web`/Caddy).
   Одно событие кэшируется отдельно по городам.
 - **Сервер**: есть служебный эндпоинт `GET /api/event-cities?url=…` (CORS) для выбора
   городов события в мини-приложении; хост URL валидируется (SSRF-защита).
-- Schema lives in `schema.js` (Drizzle `sqliteTable`). After editing schema run `npm run db:generate` (`drizzle-kit generate`), then `npm run migrate` to apply. `server.js` also applies migrations at startup.- **Площадки из поиска — через очередь `venue_queue`**, а не «обходом на месте».
-  Ключевики только ставят площадки в очередь (`enqueueVenue`), обход делает
-  `runVenueCrawl()` в `runCheck` ПОСЛЕ цикла позиций (иначе свежие кандидаты ждали бы
-  следующий цикл). `dueAt` — срок следующего обхода по срочности событий
-  (`venueIntervalMs`), `cursor` — продолжение длинной сетки. Один URL обходится ОДИН
-  раз за проход, уведомления уходят всем позициям, чей поиск его нашёл.
-  Не зажимай `dueAt` в `Math.max(now, …)` — ломает приоритет очереди.
-  Старый `venueQueryCache` (Map в памяти) удалён: он давал 1296 «пропусков» на 85 обходов.
-- **Сервер (Droplet) — диск всего 8.7 ГБ и он ЗАБИВАЛСЯ до 100%** (`/var/lib/containerd`
-  копит старые образы после деплоя; симптом — `docker cp`/`scp`: `no space left on device`,
-  в логах `gc failed`). При работе на сервере сначала `df -h /`, при нехватке —
-  `docker image prune -a -f && docker builder prune -a -f`.
+- Schema lives in `schema.js` (Drizzle `sqliteTable`). After editing schema run `npm run db:generate` (`drizzle-kit generate`), then `npm run migrate` to apply. `server.js` also applies migrations at startup.
 - **Площадки из поиска — через очередь `venue_queue`**, а не «обходом на месте».
   Ключевики только ставят площадки в очередь (`enqueueVenue`), обход делает
   `runVenueCrawl()` в `runCheck` ПОСЛЕ цикла позиций (иначе свежие кандидаты ждали бы
@@ -97,6 +86,8 @@ Compose (`bot`, `cron`, `web`/Caddy).
   в логах `gc failed`). При работе на сервере сначала `df -h /`, при нехватке —
   `docker image prune -a -f && docker builder prune -a -f`.
 - `SERVE_STATIC` is off in Docker; `miniapp/` is published to GitHub Pages.
+- **`CHECK_SECRET` обязателен**: при пустом значении `GET /check` отвечает 503
+  (`check_disabled`), а не открывает полный цикл проверки всем желающим.
 - **Commits**: always in **English** and following **Conventional Commits**
   (`feat:`, `fix:`, `refactor:`, `chore:`, `docs:`, `test:`, `ci:`, etc.), e.g.
   `fix: refresh mini app watch list after delete`. Never write commit messages in

@@ -70,8 +70,16 @@ function sendJson(res, status, obj) {
 }
 
 async function handleWebhook(req, res) {
+  // Ограничиваем тело: эндпоинт публичный, а апдейты Telegram всегда крошечные.
+  // Без лимита один большой POST уронил бы контейнер по памяти.
+  const MAX_BODY = 1024 * 1024; // 1 МБ
   let raw = '';
-  for await (const chunk of req) raw += chunk;
+  for await (const chunk of req) {
+    raw += chunk;
+    if (raw.length > MAX_BODY) {
+      return sendJson(res, 413, { ok: false, error: 'payload_too_large' });
+    }
+  }
   let update;
   try {
     update = JSON.parse(raw);
@@ -100,8 +108,15 @@ function enqueueUpdate(update) {
 }
 
 async function handleCheck(req, res, url) {
+  // Пустой CHECK_SECRET = эндпоинт выключен, а не открыт всем.
+  // Раньше условие `if (CHECK_SECRET && ...)` делало /check ПУБЛИЧНЫМ, если
+  // переменная не задана: любой мог запустить полный цикл (обход всех сайтов +
+  // рассылка в Telegram) и получить бан у билетних сайтов.
+  if (!CHECK_SECRET) {
+    return sendJson(res, 503, { ok: false, error: 'check_disabled' });
+  }
   const secret = url.searchParams.get('secret') || '';
-  if (CHECK_SECRET && secret !== CHECK_SECRET) {
+  if (secret !== CHECK_SECRET) {
     return sendJson(res, 403, { ok: false, error: 'forbidden' });
   }
   try {
@@ -247,7 +262,9 @@ function sendHeaders(res, headers, status, obj) {
 async function serveStatic(res, pathname) {
   let rel = pathname === '/' ? '/index.html' : pathname;
   const file = path.normalize(path.join(MINIAPP_DIR, rel));
-  if (!file.startsWith(MINIAPP_DIR)) return false;
+  // Префиксная проверка с разделителем: иначе соседняя папка `miniapp-evil`
+  // прошла бы как содержимое MINIAPP_DIR.
+  if (file !== MINIAPP_DIR && !file.startsWith(MINIAPP_DIR + path.sep)) return false;
   try {
     const body = await readFile(file);
     const ext = path.extname(file).toLowerCase();
@@ -271,7 +288,7 @@ async function serveStatic(res, pathname) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   try {
-    if (url.pathname === '/webhook' && (req.method === 'POST' || req.method === 'GET')) {
+    if (url.pathname === '/webhook' && req.method === 'POST') {
       return await handleWebhook(req, res);
     }
     if (url.pathname === '/check' && req.method === 'GET') {
