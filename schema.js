@@ -130,6 +130,10 @@ export const checkLog = sqliteTable(
     // Добор площадок заранее и откладывание из-за бюджета (курсор сохранён).
     venueQueueEarly: integer('venue_queue_early').default(0),
     venueQueueDeferred: integer('venue_queue_deferred').default(0),
+    // Площадку переименовали на сайте — slug обновлён вместо вечного backoff.
+    venueQueueRenamed: integer('venue_queue_renamed').default(0),
+    // Снимок: сколько РАЗНЫХ площадок битые прямо сейчас (не сумма за сутки).
+    venueQueueFailingNow: integer('venue_queue_failing_now').default(0),
     // Сколько раз в поиске нашлось >= MAX_VENUE_RESULTS_PER_QUERY площадок.
     venueQuotaHit: integer('venue_quota_hit').default(0),
     // Обход площадок прерван: всего / по времени / из-за бюджета; сколько отложено.

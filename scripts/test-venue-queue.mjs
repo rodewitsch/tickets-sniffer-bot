@@ -97,6 +97,83 @@ const failAfter = (await db.select().from((await import('../schema.js')).venueQu
 const failDelay = failAfter.dueAt - now();
 ok(failDelay > 0 && failDelay < 13 * 3600, `fail backoff in hours, not days (got ${Math.round(failDelay / 60)} min)`);
 
+// 9. РЕГРЕССИЯ: переименование площадки на сайте. Старый slug отдаёт 404, поиск
+//    находит новый. Раньше запись оставалась «битой» навсегда, а новый slug
+//    заводил ВТОРУЮ строку — мёртвая продолжала опрашиваться и накручивать
+//    счётчик (в проде 40 срабатываний за сутки при 4 записях).
+const OLD_SLUG = '5148-brestskij-teatr-kukol';
+const NEW_SLUG = '5148-zasluzhennyj-kollektiv-respubliki-belarus-brestskij-teatr-kukol';
+const OLD_URL = `https://bycard.by/afisha/minsk/venues/${OLD_SLUG}`;
+const NEW_URL = `https://bycard.by/afisha/minsk/venues/${NEW_SLUG}`;
+
+await q.enqueueVenue({ watchItemId: item.id, chatId: 1, venue: { uid: OLD_SLUG, url: OLD_URL, name: 'Театр кукол' }, dueAt: now() });
+let renamedRow = (await db.select().from((await import('../schema.js')).venueQueue).all()).find((r) => r.slug === OLD_SLUG);
+ok(!!renamedRow, 'rename: old record created');
+
+const okRename = await q.renameVenue(renamedRow.id, { slug: NEW_SLUG, url: NEW_URL, title: 'Брестский театр кукол' });
+renamedRow = (await db.select().from((await import('../schema.js')).venueQueue).all()).find((r) => r.id === renamedRow.id);
+ok(okRename === true && renamedRow.slug === NEW_SLUG && renamedRow.url === NEW_URL, 'rename: slug and url replaced');
+ok(renamedRow.failing === false, 'rename: record is no longer marked failing');
+
+// При столкновении (новая запись уже существует) старая должна ИСЧЕЗНУТЬ,
+// а не остаться второй строкой.
+await q.enqueueVenue({ watchItemId: item.id, chatId: 1, venue: { uid: OLD_SLUG, url: OLD_URL, name: 'Театр кукол' }, dueAt: now() });
+const dupOld = (await db.select().from((await import('../schema.js')).venueQueue).all()).find((r) => r.slug === OLD_SLUG);
+await q.renameVenue(dupOld.id, { slug: NEW_SLUG, url: NEW_URL, title: 'Брестский театр кукол' });
+const afterClash = (await db.select().from((await import('../schema.js')).venueQueue).all());
+ok(afterClash.filter((r) => r.slug === NEW_SLUG).length === 1, 'rename: clash collapses to one row');
+ok(!afterClash.some((r) => r.id === dupOld.id), 'rename: stale duplicate removed');
+
+// 10. Честный счётчик битых: считаем РАЗНЫЕ URL, а не строки и не события
+//     (раньше сумма событий за сутки показывала «40» при четырёх площадках).
+const { venueQueue: VQ } = await import('../schema.js');
+// Изолируемся: чистим очередь, чтобы в счёте не участвовали записи прошлых кейсов.
+await db.delete(VQ).run();
+const mk = (slug) => ({ uid: slug, url: `https://x/${slug}`, name: slug });
+
+// Две строки с ОДНИМ url (разные позиции) — это одна битая площадка, не две.
+await q.enqueueVenue({ watchItemId: item.id, chatId: 1, venue: mk('same-url'), dueAt: now() });
+await q.enqueueVenue({ watchItemId: other.id, chatId: 2, venue: mk('same-url'), dueAt: now() });
+// Третья — другой url.
+await q.enqueueVenue({ watchItemId: item.id, chatId: 1, venue: mk('other-url'), dueAt: now() });
+for (const r of await db.select().from(VQ).all()) {
+  await q.failVenue(r.id, { dueAt: now(), attempts: 1 });
+}
+const rowsNow = await db.select().from(VQ).all();
+const failingCount = await q.failingVenueCount();
+ok(rowsNow.length === 3 && rowsNow.every((r) => r.failing), 'all three rows marked failing');
+ok(failingCount === 2, `failingVenueCount counts distinct urls (3 rows, 2 urls; got ${failingCount})`);
+
+// 11. Слияние «битый старый slug + живой новый». Именно так накапливался мусор:
+//     сайт переименовал площадку, поиск завёл новую строку, старая 404 осталась.
+//     dropSupersededVenues убирает битую, если у позиции есть живая «та же» площадка.
+await db.delete(VQ).run();
+// Переименование: числовой префикс сохраняется.
+await q.enqueueVenue({ watchItemId: item.id, chatId: 1, venue: mk('5148-brestskij-teatr-kukol'), dueAt: now() });
+await q.enqueueVenue({ watchItemId: item.id, chatId: 1, venue: mk('5148-zasluzhennyj-kollektiv-respubliki-belarus-brestskij-teatr-kukol'), dueAt: now() });
+// ОДИНОЧНАЯ битая площадка без пары — её трогать нельзя (иначе потеряем слежение).
+await q.enqueueVenue({ watchItemId: item.id, chatId: 1, venue: mk('999-lonely-venue'), dueAt: now() });
+
+const allRows = await db.select().from(VQ).all();
+for (const r of allRows) {
+  if (r.slug.includes('brestskij') || r.slug.startsWith('999-')) {
+    // Брестский старый slug и одинокая — битые; новый брестский оставляем живым.
+    if (r.slug === '5148-brestskij-teatr-kukol' || r.slug.startsWith('999-')) {
+      await q.failVenue(r.id, { dueAt: now(), attempts: 1 });
+    }
+  }
+}
+
+ok(q.venueLooksSame('5148-brestskij-teatr-kukol', '5148-zasluzhennyj-kollektiv-respubliki-belarus-brestskij-teatr-kukol'), 'venueLooksSame: same numeric prefix');
+ok(!q.venueLooksSame('43-gomelskij-teatr', '77-kinoteatr-avrora'), 'venueLooksSame: different venues stay distinct');
+
+const dropped = await q.dropSupersededVenues();
+const remaining = await db.select().from(VQ).all();
+ok(dropped === 1, `dropSupersededVenues removed the stale duplicate (got ${dropped})`);
+ok(!remaining.some((r) => r.slug === '5148-brestskij-teatr-kukol'), 'stale renamed slug gone');
+ok(remaining.some((r) => r.slug.startsWith('5148-zasluzhennyj')), 'live renamed slug kept');
+ok(remaining.some((r) => r.slug === '999-lonely-venue'), 'lonely broken venue NOT dropped');
+
 console.log('\n' + (fails ? `${fails} FAILED` : 'ALL PASSED'));
 // Соединение better-sqlite3 держит файл — закрываем перед удалением (в Windows
 // иначе EBUSY).

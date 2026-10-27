@@ -255,8 +255,8 @@ async function main() {
       health: {
         cycles: 10, avgMs: 90000, medianMs: 28000, maxMs: 424000, slowCycles: 5,
         failed: 0, prevFailed: 2, venueSkipped: 713, prevVenueSkipped: 1296,
-        venueTried: 297, venueFailed: 13, crawlPct: 1, crawlTruncated: 5,
-        budgetPct: 35, lastAgeMin: 1,
+        venueTried: 297, venueFailed: 40, venueFailedNow: 4, venueRenamed: 2,
+        crawlPct: 1, crawlTruncated: 5, budgetPct: 35, lastAgeMin: 1,
       },
       budget: { cycles: 0 },
     },
@@ -266,7 +266,11 @@ async function main() {
   assert.ok(healthy.includes('Ошибки позиций ✅ — 0 за сутки (было 2)'), 'errors compared with yesterday');
   assert.ok(healthy.includes('медиана 28 с'), 'cycle time uses median, not outlier-heavy average');
   assert.ok(healthy.includes('297 обходов (было 1296 — стало лучше)'), 'crawl trend shown');
-  assert.ok(healthy.includes('битых площадок: 13'), 'broken venues flagged');
+  // Счётчик битых — снимок «сейчас», а не сумма событий за сутки: одна мёртвая
+  // запись, переопрашиваемая каждые 1–12 ч, давала «40» при четырёх реальных.
+  assert.ok(healthy.includes('битых площадок сейчас: 4'), 'broken count is a snapshot, not a daily sum');
+  assert.ok(healthy.includes('попыток за сутки 40'), 'attempt count kept as secondary info');
+  assert.ok(healthy.includes('исправлено переименованных площадок: 2'), 'renamed venues reported');
 
   const sick = formatReport({
     ...healthBase,
