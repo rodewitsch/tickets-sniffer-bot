@@ -5,3 +5,7 @@ data/
 *.db
 *.db-shm
 *.db-wal
+
+data/prod-snap.db
+data/prod-snap.db-wal
+data/prod-snap.db-shm

@@ -23,7 +23,7 @@ Compose (`bot`, `cron`, `web`/Caddy).
 | `drizzle/` | Generated migration SQL + journal (from `drizzle-kit generate`), applied at startup. |
 | `api.js` | Telegram Bot API: `api.<method>(params)` → unwrapped result, throws `BotApiError`. |
 | `env.js` | Config from `process.env`: `BOT_TOKEN`, `PORT`, `DB_PATH`, `CHECK_SECRET`, `API_HOST`. |
-| `lib/` | Business logic: `checker`, `watch`, `menus`, `webapp`, `util`, `http`, `jsonld`, `normalize`, `sources/{afisha,ticketpro}`, `config`. |
+| `lib/` | Business logic: `checker`, `watch`, `menus`, `webapp`, `util`, `http`, `jsonld`, `normalize`, `stats`, `ai-report`, `sources/{afisha,ticketpro}`, `config`. |
 | `handlers/` | Webhook handlers, one per update type (`message`, `callback_query`). |
 | `server.js` | HTTP server: `POST /webhook`, `GET /check`, `GET /health`. Entrypoint. |
 | `migrate.js` | Applies `drizzle/` migrations. Runs at server startup and via `npm run migrate`. |
@@ -72,8 +72,7 @@ Compose (`bot`, `cron`, `web`/Caddy).
   Одно событие кэшируется отдельно по городам.
 - **Сервер**: есть служебный эндпоинт `GET /api/event-cities?url=…` (CORS) для выбора
   городов события в мини-приложении; хост URL валидируется (SSRF-защита).
-- Schema lives in `schema.js` (Drizzle `sqliteTable`). After editing schema run `npm run db:generate` (`drizzle-kit generate`), then `npm run migrate` to apply. `server.js` also applies migrations at startup.
-- **Площадки из поиска — через очередь `venue_queue`**, а не «обходом на месте».
+- Schema lives in `schema.js` (Drizzle `sqliteTable`). After editing schema run `npm run db:generate` (`drizzle-kit generate`), then `npm run migrate` to apply. `server.js` also applies migrations at startup.- **Площадки из поиска — через очередь `venue_queue`**, а не «обходом на месте».
   Ключевики только ставят площадки в очередь (`enqueueVenue`), обход делает
   `runVenueCrawl()` в `runCheck` ПОСЛЕ цикла позиций (иначе свежие кандидаты ждали бы
   следующий цикл). `dueAt` — срок следующего обхода по срочности событий
@@ -113,6 +112,26 @@ Compose (`bot`, `cron`, `web`/Caddy).
   droplet → `docker load` → `docker compose up -d` (no git on server). Secrets: `DROPLET_HOST`,
   `DROPLET_USER`, `DROPLET_PASSWORD`. Path to project is hardcoded (`/opt/tickets-bot`).
 - Tests: `npm test` (= `npm run smoke`) validates the DB layer (Drizzle + SQLite) against a real DB.
+  `npm run test:ai` covers the AI report (`scripts/test-ai-report.mjs`, no key needed).
+
+## Daily AI report
+
+`lib/ai-report.js` + `sendAiReport()` in `lib/stats.js` send a short human
+analysis of the day's numbers right after the regular stats message.
+
+- Model: DeepSeek (`deepseek-chat`), OpenAI-compatible API at `DEEPSEEK_API_BASE`.
+- Context = `collectDiagnostics()` in `lib/stats.js`: today's counters, a 7-day
+  trend from `check_log`, broken venues, stale watch items. **Never raw logs** —
+  the snapshot is ~700 tokens; raw logs are megabytes.
+- **Graceful degradation is a hard contract**: no `DEEPSEEK_API_KEY` ⇒ feature off;
+  any HTTP/timeout/parse failure ⇒ `null`, never an exception into the stats path.
+  The `lastStatsDay` marker is written *before* the AI step so a failure cannot
+  trigger a duplicate base report.
+- Answer is sent with `parse_mode: 'HTML'`, so model output must be escaped via
+  `escapeHtml()` from `lib/util.js` — the model writes markdown/emoji freely.
+- The request has its own `AbortSignal.timeout(AI_TIMEOUT_MS)`; a hung call
+  blocked a check cycle once (`api.js` bug), don't repeat it.
+
 
 ## History
 
