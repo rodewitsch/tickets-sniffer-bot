@@ -57,6 +57,15 @@ async function main() {
     assert.ok(cols.includes(col), `check_log has ${col} after migrations`);
   }
 
+  // venue_queue: уникальность (позиция, площадка) — на неё опирается enqueueVenue
+  // (onConflictDoNothing) и дедупликация обхода. Индекс объявлен только в SQL
+  // миграции, поэтому проверяем его наличие явно, а не «на глаз».
+  const vqIdx = sqlite.prepare('PRAGMA index_list(venue_queue)').all();
+  const uniq = vqIdx.find((i) => i.name === 'uidx_venue_queue_item_slug');
+  assert.ok(uniq, 'venue_queue has uidx_venue_queue_item_slug');
+  assert.equal(uniq.unique, 1, 'uidx_venue_queue_item_slug is UNIQUE');
+  assert.ok(vqIdx.some((i) => i.name === 'idx_venue_queue_due'), 'venue_queue has due_at index');
+
   // users: insert + onConflictDoUpdate
   await db.insert(users).values({ chatId: 1, username: 'a', firstName: 'A' })
     .onConflictDoUpdate({ target: users.chatId, set: { lastSeenAt: 111 } }).run();
@@ -195,6 +204,24 @@ async function main() {
   assert.equal(usage.venueCrawlBudgetTruncated, 1, 'budget truncation counted separately');
   assert.equal(usage.venueCrawlTruncated, 2, 'total truncation kept for compatibility');
   assert.equal(usage.venueCrawlDeferred, 1, 'deferred candidates counted');
+
+  // Планирование бюджета «на чат» (lib/checker.js): сумма квот НИКОГДА не больше
+  // бюджета (иначе лимит на чат ограничивал бы не то), и каждый чат получает
+  // минимум, если бюджета хватает на всех.
+  const { planPerChatAllocation } = await import('./lib/checker.js');
+  const sumPlan = (plan) => [...plan.values()].reduce((a, b) => a + b, 0);
+  for (const total of [1, 2, 3, 7, 16, 24, 100]) {
+    for (const widths of [[1], [1, 1, 1], [6, 1, 1, 1, 1, 1, 1], [3, 3, 3], [12, 9, 7, 5, 3, 1]]) {
+      const items = [];
+      widths.forEach((n, chatId) => {
+        for (let i = 0; i < n; i++) items.push({ chatId, kind: 'query', id: `${chatId}-${i}` });
+      });
+      const plan = planPerChatAllocation(items, total);
+      assert.ok(sumPlan(plan) <= total, `plan sum ${sumPlan(plan)} <= ${total} (widths ${widths})`);
+      assert.equal(plan.size, widths.length, 'every chat has a quota entry');
+      for (const v of plan.values()) assert.ok(v >= 0, 'no negative quotas');
+    }
+  }
 
   // check_log: новые колонки пишутся и читаются (миграция 0006).
   await db.insert(checkLog).values({

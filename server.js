@@ -142,6 +142,7 @@ function corsHeaders(req) {
 }
 
 async function handleEventCities(req, res, url) {
+  if (!allowSearchRequest(req)) return sendRateLimited(req, res);
   const target = url.searchParams.get('url') || '';
   let parsed;
   try {
@@ -171,6 +172,7 @@ async function handleEventCities(req, res, url) {
 // GET /api/ticketpro-search?q=<word> — живой поиск Ticketpro для Mini App:
 // события (страница расширенного поиска) + площадки (кэш списка площадок).
 async function handleTicketproSearch(req, res, url) {
+  if (!allowSearchRequest(req)) return sendRateLimited(req, res);
   const q = (url.searchParams.get('q') || '').trim().slice(0, 120);
   if (!q) return sendHeaders(res, corsHeaders(req), 400, { ok: false, error: 'bad_query' });
   try {
@@ -202,6 +204,7 @@ async function handleTicketproSearch(req, res, url) {
 
 // GET /api/bezkassira-search?q=<word> — живой поиск BezKassira для Mini App.
 async function handleBezkassiraSearch(req, res, url) {
+  if (!allowSearchRequest(req)) return sendRateLimited(req, res);
   const q = (url.searchParams.get('q') || '').trim().slice(0, 120);
   if (!q) return sendHeaders(res, corsHeaders(req), 400, { ok: false, error: 'bad_query' });
   try {
@@ -258,6 +261,61 @@ function sendHeaders(res, headers, status, obj) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', ...headers });
   res.end(JSON.stringify(obj));
 }
+
+// Простой лимитер на IP для эндпоинтов, которые ходят на ВНЕШНИЕ сайты.
+//
+// Зачем: `/api/ticketpro-search` и `/api/bezkassira-search` — публичные (CORS для
+// мини-приложения) и на каждый запрос делают поиск по сайту ПЛЮС по одному
+// запросу страницы на каждую найденную карточку (enrich*). Без лимита один
+// скрипт мог раскрутить нас в усилитель нагрузки на билетные сайты — и получить
+// бан нашему Droplet'у. Токен-бакет «на IP» дешёвый и без состояния в БД.
+//
+// Настройки: SEARCH_RATE_PER_MIN (по умолчанию 20) запросов в минуту на IP.
+// В памяти процесса — при нескольких репликах лимит будет своой у каждой, это
+// осознанный компромисс (в проде `web` один).
+const SEARCH_RATE_PER_MIN = Number(process.env.SEARCH_RATE_PER_MIN || 20);
+const SEARCH_RATE_BURST = Math.max(1, SEARCH_RATE_PER_MIN);
+const rateBuckets = new Map(); // ip → { tokens, ts }
+// Чистим карту, чтобы она не росла бесконечно от сканеров.
+const RATE_MAP_MAX = 5000;
+
+function clientIp(req) {
+  // За Caddy реальный адрес приходит в X-Forwarded-For (первый — клиентский).
+  const xff = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  return xff || req.socket?.remoteAddress || 'unknown';
+}
+
+/** true — запрос разрешён; false — лимит исчерпан (отвечаем 429). */
+function allowSearchRequest(req) {
+  if (SEARCH_RATE_PER_MIN <= 0) return true;
+  const ip = clientIp(req);
+  const now = Date.now();
+  const refillPerMs = SEARCH_RATE_PER_MIN / 60000;
+  let b = rateBuckets.get(ip);
+  if (!b) {
+    if (rateBuckets.size > RATE_MAP_MAX) rateBuckets.clear();
+    b = { tokens: SEARCH_RATE_BURST, ts: now };
+    rateBuckets.set(ip, b);
+  } else {
+    b.tokens = Math.min(SEARCH_RATE_BURST, b.tokens + (now - b.ts) * refillPerMs);
+    b.ts = now;
+  }
+  if (b.tokens < 1) return false;
+  b.tokens -= 1;
+  return true;
+}
+
+// Отказ по лимиту с заголовком Retry-After — браузер мини-приложения покажет
+// «попробуйте позже», а не будет долбиться в цикле.
+function sendRateLimited(req, res) {
+  const retry = Math.max(1, Math.ceil(60 / Math.max(1, SEARCH_RATE_PER_MIN)));
+  sendHeaders(res, { ...corsHeaders(req), 'Retry-After': String(retry) }, 429, {
+    ok: false,
+    error: 'rate_limited',
+    retryAfterSec: retry,
+  });
+}
+
 
 async function serveStatic(res, pathname) {
   let rel = pathname === '/' ? '/index.html' : pathname;
