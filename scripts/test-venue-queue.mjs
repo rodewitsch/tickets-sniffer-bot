@@ -97,6 +97,25 @@ const failAfter = (await db.select().from((await import('../schema.js')).venueQu
 const failDelay = failAfter.dueAt - now();
 ok(failDelay > 0 && failDelay < 13 * 3600, `fail backoff in hours, not days (got ${Math.round(failDelay / 60)} min)`);
 
+// 8b. РЕГРЕССИЯ: failVenueGroup отправляет в backoff ВСЕ строки одного адреса.
+//     Очередь держит строку на пару (позиция, площадка), поэтому одна площадка
+//     от двух пользователей = две строки с одним url. Обход качает страницу
+//     один раз на группу, значит и провал общий — иначе вторая строка остаётся
+//     просроченной и следующий цикл снова идёт на тот же мёртвый адрес
+//     (в проде: 40 «сбоев площадок» за сутки при 2 реально битых).
+const dupUrl = 'https://bycard.by/afisha/minsk/venues/dup-venue';
+const [dupItem] = await db.insert(watchItems)
+  .values({ chatId: 777, kind: 'query', query: 'дубль', title: 'дубль' })
+  .returning();
+await q.enqueueVenue({ watchItemId: item.id, chatId: 1, venue: { uid: 'dup', url: dupUrl, name: 'dup' }, dueAt: now() });
+await q.enqueueVenue({ watchItemId: dupItem.id, chatId: 777, venue: { uid: 'dup', url: dupUrl, name: 'dup' }, dueAt: now() });
+await q.failVenueGroup(dupUrl, { attempts: 1 });
+const dupRows = (await db.select().from((await import('../schema.js')).venueQueue).all()).filter((r) => r.url === dupUrl);
+ok(dupRows.length === 2, `group fail fixture has 2 rows (got ${dupRows.length})`);
+ok(dupRows.every((r) => r.failing), 'failVenueGroup marked every row of the url');
+ok(dupRows.every((r) => r.dueAt > now() + 3000), 'failVenueGroup deferred every row');
+ok((await q.failingVenueCount()) >= 2, 'failingVenueCount still counts distinct urls only');
+
 // 9. РЕГРЕССИЯ: переименование площадки на сайте. Старый slug отдаёт 404, поиск
 //    находит новый. Раньше запись оставалась «битой» навсегда, а новый slug
 //    заводил ВТОРУЮ строку — мёртвая продолжала опрашиваться и накручивать

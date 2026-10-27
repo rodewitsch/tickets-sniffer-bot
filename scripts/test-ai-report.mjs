@@ -43,6 +43,14 @@ async function runDisabled() {
 async function runEnabled() {
   console.log('с ключом:');
 
+  // env.js читает process.env на импорте. Если ключ забыли выставить, падаем
+  // сразу с понятным сообщением, а не TypeError на null ниже.
+  if (!process.env.DEEPSEEK_API_KEY) {
+    console.log('  SKIP  DEEPSEEK_API_KEY не задан — запустите с ключом:');
+    console.log('        $env:DEEPSEEK_API_KEY="sk-test"; node scripts/test-ai-report.mjs enabled');
+    process.exit(1);
+  }
+
   const captured = [];
   globalThis.fetch = async (url, init) => {
     captured.push({ url, init });
@@ -59,7 +67,7 @@ async function runEnabled() {
 
   const snapshot = {
     today: { cycles: 24, failed: 1, budgetPct: 87 },
-    venues: { queued: 12, failing: 2, failingList: [{ slug: 'dtu', dueInMin: 30 }] },
+    venues: { queued: 12, failing: 2, failingUrls: 1, failingList: [{ url: 'https://bycard.by/afisha/minsk/venues/dtu', rows: 2, dueInMin: 30 }] },
     trend: [{ date: '2025-01-01', cycles: 24 }],
   };
   const text = await mod.requestAiReport(snapshot);
@@ -75,9 +83,10 @@ async function runEnabled() {
   check('temperature низкая', body.temperature === 0.3);
   check('есть system и user', body.messages?.length === 2);
   const userText = body.messages?.[1]?.content || '';
-  check('в промпт попал снимок', userText.includes('"failing": 2'));
+  check('в промпт попал снимок', userText.includes('"failingUrls": 1'));
   check('в промпте слово venue', userText.includes('venue'));
   check('система упоминает бюджет', /budgetPct/.test(body.messages?.[0]?.content || ''));
+  check('система объясняет failing vs failingUrls', /failingUrls/.test(body.messages?.[0]?.content || ''));
 
   // Ошибка HTTP → null, без исключения.
   globalThis.fetch = async () => ({ ok: false, status: 429, text: async () => 'rate limit' });
