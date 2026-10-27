@@ -234,8 +234,11 @@ async function handleBezkassiraSearch(req, res, url) {
 }
 
 // GET /api/bezkassira-organizer?url=<eventUrl> — организатор события (для
-// отслеживания «площадки»). Валидируем хост (SSRF-защита).
+// отслеживания «площадки»). Валидируем хост (SSRF-защита) и ограничиваем частоту:
+// эндпоинт публичный (CORS для мини-приложения) и делает внешний запрос, так что
+// без лимита это вектор усиления нагрузки на сайт — как у остальных search-API.
 async function handleBezkassiraOrganizer(req, res, url) {
+  if (!allowSearchRequest(req)) return sendRateLimited(req, res);
   const target = url.searchParams.get('url') || '';
   let parsed;
   try {
