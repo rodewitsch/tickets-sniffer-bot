@@ -180,8 +180,9 @@ async function handleTicketproSearch(req, res, url) {
       searchTicketpro(q),
       searchTicketproVenues(q),
     ]);
-    // Категория (кино/театр/концерт/…) в карточках Ticketpro не выводится — её
-    // читаем из хлебных крошек страницы события (как тип у bycard).
+    // Категория (кино/театр/концерт/…) теперь приходит прямо из API Ticketpro
+    // (primaryCategory), так что enrichTicketproCategories — просто прозрачная
+    // обёртка; оставлена для совместимости сигнатуры.
     const events = await enrichTicketproCategories(searchEvents);
     sendHeaders(res, corsHeaders(req), 200, {
       ok: true,
