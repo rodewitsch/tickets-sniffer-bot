@@ -323,6 +323,59 @@ async function main() {
   assert.ok(disabledText(del).includes('удалены'), 'result confirms deletion');
   assert.ok(JSON.stringify(mainReplyKeyboard('https://x', false)).includes(DISABLE_BUTTON), 'disable button present in reply keyboard');
 
+  // «🔕 Больше не уведомлять» глушит ОДНО событие, а не всю подписку.
+  //
+  // Это и был баг: под словом «театр» лежат десятки спектаклей, и нажатие под
+  // одним выключало слово целиком. Проверяем именно то, из-за чего кнопка
+  // переделывалась: позиция ОСТАЁТСЯ активной, глушится только её событие.
+  const { muteEvent, isEventMuted, listMutedEvents, unmuteEvent, unmuteAllEvents } = await import('./lib/watch.js');
+  const { ticketKeyboard, renderMutedEvents } = await import('./lib/menus.js');
+  const muteChat = 900004;
+  await deleteAllUserData(muteChat);
+  await db.insert(users).values({ chatId: muteChat }).run();
+  const word = await addWatchItem({ chatId: muteChat, kind: 'query', query: 'театр' });
+  const keyA = 'ev:цветы для элджернона:20740';
+  const keyB = 'ev:ревизор:20741';
+
+  // Кнопка несёт и позицию (найти владельца), и ключ события (что глушить).
+  const kb = ticketKeyboard({ source: 'afisha', url: 'https://24afisha.by/ru/minsk/event/x' }, word.row.id, keyA);
+  const muteBtn = kb.inline_keyboard.flat().find((b) => (b.callback_data || '').startsWith('mute:'));
+  assert.ok(muteBtn, 'mute button rendered when the event key is known');
+  assert.equal(
+    Buffer.from(muteBtn.callback_data.split(':')[2], 'base64url').toString('utf8'),
+    keyA,
+    'callback_data carries the event key',
+  );
+  // Без ключа события глушить нечего — кнопку не показываем.
+  const kbNoKey = ticketKeyboard({ source: 'afisha', url: 'https://x' }, word.row.id);
+  assert.ok(!kbNoKey.inline_keyboard.flat().some((b) => (b.callback_data || '').startsWith('mute:')), 'no mute button without an event key');
+
+  await muteEvent({ chatId: muteChat, dedupeKey: keyA, title: 'Цветы для Элджернона' });
+  assert.equal(await isEventMuted(muteChat, keyA), true, 'muted event is flagged');
+  assert.equal(await isEventMuted(muteChat, keyB), false, 'other events of the same keyword stay active');
+  // ГЛАВНОЕ требование: сама подписка не тронута.
+  const wordAfter = await listWatchItems(muteChat);
+  assert.equal(wordAfter.length, 1, 'keyword subscription survives muting an event');
+  assert.equal(wordAfter[0].active, true, 'keyword remains active');
+  assert.equal(wordAfter[0].id, word.row.id, 'same subscription row untouched');
+  // Повторное нажатие не плодит записи.
+  await muteEvent({ chatId: muteChat, dedupeKey: keyA, title: 'Цветы для Элджернона' });
+  assert.equal((await listMutedEvents(muteChat)).length, 1, 'muting is idempotent');
+  // Чужая заглушка не действует на другого пользователя.
+  assert.equal(await isEventMuted(900005, keyA), false, 'mutes are per-chat');
+  // Снятие заглушки возвращает событие.
+  const mutedRow = (await listMutedEvents(muteChat))[0];
+  await unmuteEvent(muteChat, mutedRow.id);
+  assert.equal(await isEventMuted(muteChat, keyA), false, 'unmute restores the event');
+  await muteEvent({ chatId: muteChat, dedupeKey: keyB, title: 'Ревизор' });
+  await unmuteAllEvents(muteChat);
+  assert.equal((await listMutedEvents(muteChat)).length, 0, 'unmute all clears the list');
+  // «Отключить бота» обязан чистить и заглушки.
+  await muteEvent({ chatId: muteChat, dedupeKey: keyA, title: 'X' });
+  const delMuted = await deleteAllUserData(muteChat);
+  assert.equal(delMuted.mutedEvents, 1, 'account deletion removes muted events');
+  assert.ok(renderMutedEvents([]).includes('сама подписка продолжает работать'), 'empty muted list explains the mechanism');
+
   // Отчёт: разбивка «в продаже» — по источникам, а не все события кэша; обход
   // площадок, прерванный по бюджету, не выдаёт себя за прерывание по времени.
   const report = formatReport({

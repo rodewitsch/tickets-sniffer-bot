@@ -1,6 +1,6 @@
 import { api } from '../api.js';
-import { HELP, helpKeyboard, renderWatchlist, mainMenuKeyboard, mainReplyKeyboard, NO_LINK_PREVIEW, disableConfirmText, disableConfirmKeyboard, disabledText } from '../lib/menus.js';
-import { listWatchItems, removeWatchItem, deactivateWatchItem, getWatchItem, miniAppUrl, miniAppConfigured, SOURCE_LABEL, deleteAllUserData } from '../lib/watch.js';
+import { HELP, helpKeyboard, renderWatchlist, mainMenuKeyboard, mainReplyKeyboard, NO_LINK_PREVIEW, disableConfirmText, disableConfirmKeyboard, disabledText, renderMutedEvents, mutedEventsKeyboard } from '../lib/menus.js';
+import { listWatchItems, removeWatchItem, deactivateWatchItem, getWatchItem, miniAppUrl, miniAppConfigured, SOURCE_LABEL, deleteAllUserData, muteEvent, listMutedEvents, unmuteEvent, unmuteAllEvents } from '../lib/watch.js';
 import { addWatchItem } from '../lib/watch.js';
 import { sendFreshReplyKeyboard } from '../lib/reply.js';
 import { startFeedback, clearFeedback } from '../lib/feedback.js';
@@ -12,6 +12,22 @@ const FEEDBACK_PROMPT_TEXT =
   'Опишите, что случилось (ошибка) или что хотите предложить, и отправьте одним текстовым сообщением.';
 function feedbackPromptKeyboard() {
   return { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'feedback:cancel' }]] };
+}
+
+// Название события из карточки уведомления — только для показа в списке
+// заглушённого («что я выключил»). Заголовок карточки идёт третьей строкой
+// после «🎫 Появились билеты!» и пустой строки (см. ticketCaption).
+function titleFromNotification(cb) {
+  const caption = cb.message?.caption || cb.message?.text || '';
+  const lines = caption.split('\n').map((l) => l.trim()).filter(Boolean);
+  // ['🎫 Появились билеты!', '<b>Название</b>', '📅 …', '📍 …'] — берём вторую.
+  const candidate = lines[1] || '';
+  const clean = candidate
+    .replace(/<\/?[^>]+>/g, '')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .trim();
+  return clean ? clean.slice(0, 200) : null;
 }
 
 export default async function (cb) {
@@ -185,9 +201,48 @@ export default async function (cb) {
     return;
   }
 
+  // «🔕 Больше не уведомлять» — глушим КОНКРЕТНОЕ событие, а не подписку.
+  //
+  // Формат: mute:<watchId>:<base64url(dedupeKey)>. Раньше здесь деактивировалась
+  // вся позиция, и нажатие под одним спектаклем выключало всё слово «театр» —
+  // хотя человеку театр по-прежнему интересен, не нужен был именно этот спектакль.
+  // Старые сообщения в чатах несут голый `mute:<id>` без ключа события: для них
+  // сохраняем прежнее поведение (деактивация позиции), чтобы кнопка не «зависла»
+  // и не начала глушить всё подряд.
   if (data.startsWith('mute:')) {
-    const id = Number(data.slice(5));
-    await deactivateWatchItem(chatId, id);
+    const parts = data.split(':');
+    const watchId = Number(parts[1]);
+    const keyB64 = parts[2];
+    let dedupeKey = '';
+    if (keyB64) {
+      try {
+        dedupeKey = Buffer.from(keyB64, 'base64url').toString('utf8');
+      } catch { dedupeKey = ''; }
+    }
+
+    // Владельца проверяем по chatId (FK в SQLite нет): чужая кнопка ничего не сделает.
+    const item = Number.isFinite(watchId) ? await getWatchItem(chatId, watchId) : null;
+
+    if (dedupeKey) {
+      // Владелец позиции должен совпадать с нажавшим: иначе по чужой карточке
+      // можно было бы заглушить событие у себя (безобидно) или выдать себя за
+      // другого. Позиция могла быть уже удалена — тогда ориентируемся только на
+      // chatId самого нажатия, он и так наш.
+      const owner = item ? item.chatId : chatId;
+      if (owner !== chatId) return;
+      await muteEvent({ chatId, dedupeKey, title: titleFromNotification(cb), dateText: null });
+      try {
+        await api.editMessageReplyMarkup({ chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [] } });
+      } catch { /* сообщение могло измениться */ }
+      const text =
+        '🔕 Больше не буду присылать уведомления про это событие.\n' +
+        '<i>Ваши остальные подписки (в том числе по этому же слову) продолжают работать.</i>';
+      await api.sendMessage({ chat_id: chatId, text, parse_mode: 'HTML' });
+      return;
+    }
+
+    // Легаси-формат `mute:<id>` из сообщений, отправленных до этого изменения.
+    await deactivateWatchItem(chatId, watchId);
     try {
       await api.editMessageReplyMarkup({ chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [] } });
     } catch { /* сообщение могло измениться */ }
@@ -195,6 +250,52 @@ export default async function (cb) {
     // Единственное подтверждение — сообщение со свежей reply-клавиатурой
     // (свежий снапшот списка Mini App). Текст отдельным sendMessage не дублируем.
     await sendFreshReplyKeyboard(chatId, text);
+    return;
+  }
+
+  // ── «🔕 Заглушённые события»: список и снятие заглушек ─────────────────────
+  // Обратный путь к кнопке «Больше не уведомлять»: без него человек, заглушивший
+  // спектакль, не может вернуть его, не отключая подписку на слово целиком.
+  if (data === 'muted:list') {
+    const rows = await listMutedEvents(chatId);
+    const text = renderMutedEvents(rows);
+    const kb = mutedEventsKeyboard(rows);
+    if (isEditable) {
+      await api.editMessageText({ chat_id: chatId, message_id: msgId, text, parse_mode: 'HTML', reply_markup: kb });
+    } else {
+      await api.sendMessage({ chat_id: chatId, text, parse_mode: 'HTML', reply_markup: kb });
+    }
+    return;
+  }
+
+  if (data === 'muted:clear') {
+    await unmuteAllEvents(chatId);
+    const text = '🔔 Готово: снова буду присылать уведомления про все ранее заглушённые события.';
+    if (isEditable) {
+      await api.editMessageText({ chat_id: chatId, message_id: msgId, text, parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '📋 Мой список', callback_data: 'wl:list' }]] } });
+    } else {
+      await api.sendMessage({ chat_id: chatId, text, parse_mode: 'HTML' });
+    }
+    return;
+  }
+
+  if (data.startsWith('muted:un:')) {
+    const id = Number(data.slice('muted:un:'.length));
+    // Владельца проверяет сам unmuteEvent (условие по chatId), чужой id безопасен.
+    const before = await listMutedEvents(chatId);
+    const target = before.find((r) => Number(r.id) === id);
+    await unmuteEvent(chatId, id);
+    const rows = await listMutedEvents(chatId);
+    const name = target && target.title ? `«${escapeHtml(target.title)}»` : 'это событие';
+    const text = target
+      ? `🔔 Снова слежу: ${name}.${rows.length ? '' : '\n\nЗаглушённых событий больше нет.'}`
+      : '🤔 Этого события нет в списке заглушённых — возможно, уже включено.';
+    const kb = rows.length ? mutedEventsKeyboard(rows) : { inline_keyboard: [[{ text: '📋 Мой список', callback_data: 'wl:list' }]] };
+    if (isEditable) {
+      await api.editMessageText({ chat_id: chatId, message_id: msgId, text, parse_mode: 'HTML', reply_markup: kb });
+    } else {
+      await api.sendMessage({ chat_id: chatId, text, parse_mode: 'HTML', reply_markup: kb });
+    }
     return;
   }
 
