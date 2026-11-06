@@ -234,6 +234,43 @@ async function main() {
   assert.equal(logRow.venueCrawlBudgetTruncated, 1, 'venue_crawl_budget_truncated persisted');
   assert.equal(logRow.venueQuotaHit, 1, 'venue_quota_hit persisted');
 
+  // Миграция 0013: блокировка бота пользователем. Две вещи проверяем отдельно:
+  //   1) счётчик blocked_chat — отдельная колонка, а не error_items (иначе
+  //      «пользователь заблокировал бота» выглядело как поломка чекера);
+  //   2) users.blocked_at управляет пропуском позиций в lib/delivery.js.
+  resetBudgetStats();
+  record.blockedChat();
+  record.blockedChat();
+  record.errorItem();
+  const blockedUsage = snapshotBudgetStats();
+  assert.equal(blockedUsage.blockedChat, 2, 'blocked chat skips counted separately');
+  assert.equal(blockedUsage.errorItems, 1, 'error_items is not polluted by blocked chats');
+
+  const { isBlockedError, isChatDeliverable, markChatBlocked, markChatDeliverable, shouldProbeBlockedChat, resetBlockedCache } = await import('./lib/delivery.js');
+  const blockedChatId = 900001;
+  await db.insert(users).values({ chatId: blockedChatId }).run();
+  assert.equal(await isChatDeliverable(blockedChatId), true, 'new chat is deliverable');
+  await markChatBlocked(blockedChatId);
+  assert.equal(await isChatDeliverable(blockedChatId), false, 'blocked chat is skipped');
+  // Пробная отправка (раз в сутки) не должна срабатывать сразу после пометки.
+  resetBlockedCache();
+  assert.equal(await shouldProbeBlockedChat(blockedChatId), false, 'no immediate probe after blocking');
+  // Чат не в базе (старые пользователи) — считаем доставляемым, как раньше.
+  assert.equal(await isChatDeliverable(123456789), true, 'unknown chat is deliverable');
+  resetBlockedCache();
+  assert.equal(await shouldProbeBlockedChat(123456789), true, 'unknown chat may be sent to');
+  await markChatDeliverable(blockedChatId);
+  assert.equal(await isChatDeliverable(blockedChatId), true, 'unblocked chat becomes deliverable again');
+  // Распознавание 403: код ошибки и текст Telegram.
+  assert.equal(isBlockedError({ code: 403 }), true, '403 by code');
+  assert.equal(isBlockedError({ message: 'sendMessage: Forbidden: bot was blocked by the user (403)' }), true, '403 by message');
+  assert.equal(isBlockedError({ code: 429, message: 'too many requests' }), false, 'rate limit is not a block');
+  assert.equal(isBlockedError({ code: 400, message: 'bad request' }), false, 'bad request is not a block');
+
+  await db.insert(checkLog).values({ checked: 2, blockedChat: 2 }).run();
+  const blockedLogRow = await db.select().from(checkLog).orderBy(desc(checkLog.id)).get();
+  assert.equal(blockedLogRow.blockedChat, 2, 'blocked_chat persisted (migration 0013)');
+
   // Отчёт: разбивка «в продаже» — по источникам, а не все события кэша; обход
   // площадок, прерванный по бюджету, не выдаёт себя за прерывание по времени.
   const report = formatReport({
@@ -314,7 +351,7 @@ async function main() {
   const empty = formatReport({ ...healthBase, checks: { ...healthBase.checks, health: { cycles: 0 } } });
   assert.ok(!empty.includes('🩺'), 'health block hidden without cycles');
 
-  console.log('✅ smoke PASS: db works (insert/onConflict/returning/filter/count/update/delete/order) + list render (emoji/links/deep-link) + venue query matching + budget counters + stats report + health block');
+  console.log('✅ smoke PASS: db works (insert/onConflict/returning/filter/count/update/delete/order) + list render (emoji/links/deep-link) + venue query matching + budget counters + blocked-chat delivery + stats report + health block');
 }
 
 main()

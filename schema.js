@@ -2,12 +2,17 @@ import { sqliteTable, integer, text, index, uniqueIndex } from 'drizzle-orm/sqli
 import { sql } from 'drizzle-orm';
 
 // Пользователи (чат = пользователь для личного бота; поддерживаем и группы).
+// blocked_at — когда Telegram ответил 403 «bot was blocked by the user». Пока
+// пометка свежая, позиции чата не проверяются (см. lib/delivery.js): отправка
+// всё равно упадёт, а поиск билетов для того, кто их не увидит, — пустая работа.
+// Раз в сутки делается одна пробная отправка: пользователь мог вернуться.
 export const users = sqliteTable('users', {
   chatId: integer('chat_id').primaryKey(),
   username: text('username'),
   firstName: text('first_name'),
   createdAt: integer('created_at').default(sql`(unixepoch())`),
   lastSeenAt: integer('last_seen_at').default(sql`(unixepoch())`),
+  blockedAt: integer('blocked_at'),
 });
 
 // Отслеживаемые позиции.
@@ -163,6 +168,9 @@ export const checkLog = sqliteTable(
     emptyResult: integer('empty_result').default(0),
     notOnSale: integer('not_on_sale').default(0),
     errorItems: integer('error_items').default(0),
+    // Позиции не проверялись: их чат заблокировал бота (Telegram 403). Отдельный
+    // счётчик, а не error_items: это не сбой, а отсутствие адресата (lib/delivery.js).
+    blockedChat: integer('blocked_chat').default(0),
   },
   (t) => [
     index('idx_check_log_started').on(t.startedAt),

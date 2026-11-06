@@ -23,7 +23,7 @@ Compose (`bot`, `cron`, `web`/Caddy).
 | `drizzle/` | Generated migration SQL + journal (from `drizzle-kit generate`), applied at startup. |
 | `api.js` | Telegram Bot API: `api.<method>(params)` → unwrapped result, throws `BotApiError`. |
 | `env.js` | Config from `process.env`: `BOT_TOKEN`, `PORT`, `DB_PATH`, `CHECK_SECRET`, `API_HOST`. |
-| `lib/` | Business logic: `checker`, `watch`, `menus`, `webapp`, `util`, `http`, `jsonld`, `normalize`, `stats`, `ai-report`, `sources/{afisha,ticketpro}`, `config`. |
+| `lib/` | Business logic: `checker`, `watch`, `menus`, `webapp`, `util`, `http`, `jsonld`, `normalize`, `stats`, `ai-report`, `delivery`, `sources/{afisha,ticketpro,bezkassira}`, `config`. |
 | `handlers/` | Webhook handlers, one per update type (`message`, `callback_query`). |
 | `server.js` | HTTP server: `POST /webhook`, `GET /check`, `GET /health`. Entrypoint. |
 | `migrate.js` | Applies `drizzle/` migrations. Runs at server startup and via `npm run migrate`. |
@@ -81,6 +81,21 @@ Compose (`bot`, `cron`, `web`/Caddy).
   раз за проход, уведомления уходят всем позициям, чей поиск его нашёл.
   Не зажимай `dueAt` в `Math.max(now, …)` — ломает приоритет очереди.
   Старый `venueQueryCache` (Map в памяти) удалён: он давал 1296 «пропусков» на 85 обходов.
+- **Площадку опознаём по числовому id, а не по slug.** Сайт переименовывает slug'и
+  (`332-zasluzhennyj-kollektiv-…` → `332-belorusskij-…-bolshoj-zal`), а `id` в начале
+  slug'а неизменен. `resolveAfishaVenueUrl` сначала ищет тот же `id`, и только потом —
+  по названию. Если поиск по полному названию пуст (зал в названии сайта зовётся иначе:
+  «(Малая сцена)» vs «(Малый зал)»), повторяем без уточнения в скобках: по названию
+  театра находятся все залы, и нужный опознаётся по `id`. Одинаковый счёт у залов
+  ОДНОГО театра (`id` совпадает) — не «неоднозначность», ссылку чиним.
+- **Заблокировавший бота чат — это НЕ ошибка.** Telegram отвечает 403
+  «Forbidden: bot was blocked by the user» на каждую отправку. Раньше это роняло
+  позицию и поднимало `errorItems`: в проде два таких чата давали 216 «ошибок» в сутки
+  (все 356 `item.failed` за 3 дня — это 403), и в отчёте горел 🔴 при полностью рабочем
+  боте. Теперь `lib/delivery.js` пишет `users.blocked_at`, позиции чата не проверяются
+  (счётчик `blockedChat`, НЕ `errorItems`), а раз в сутки делается одна пробная
+  отправка — пользователь мог вернуться. Успешная отправка снимает пометку.
+
 - **Сервер (Droplet) — диск всего 8.7 ГБ и он ЗАБИВАЛСЯ до 100%** (`/var/lib/containerd`
   копит старые образы после деплоя; симптом — `docker cp`/`scp`: `no space left on device`,
   в логах `gc failed`). При работе на сервере сначала `df -h /`, при нехватке —
