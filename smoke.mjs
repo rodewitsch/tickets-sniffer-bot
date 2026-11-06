@@ -15,7 +15,7 @@ process.env.DB_PATH = tempDb;
 
 const { count } = await import('drizzle-orm');
 const { default: db, sqlite, eq, and, desc } = await import('./db.js');
-const { users, events, watchItems, checkLog } = await import('./schema.js');
+const { users, events, watchItems, checkLog, venueQueue, notifications } = await import('./schema.js');
 const { runMigrations } = await import('./migrate.js');
 const {
   renderWatchlist, itemEmoji, unsubDeepLink, unsubConfirmText, unsubConfirmKeyboard,
@@ -271,6 +271,58 @@ async function main() {
   const blockedLogRow = await db.select().from(checkLog).orderBy(desc(checkLog.id)).get();
   assert.equal(blockedLogRow.blockedChat, 2, 'blocked_chat persisted (migration 0013)');
 
+  // «🚪 Отключить бота»: полное удаление данных пользователя (lib/watch.js).
+  //
+  // Главное, что здесь защищаем, — ЧУЖИЕ данные не должны пострадать: очереди
+  // площадок ссылаются на позиции по id, а удаление идёт «по чату», и без
+  // явной проверки легко снести строки соседа. Плюс проверяем, что не остаётся
+  // «сирот» в venue_queue после удаления позиций (иначе обход ходил бы по ним
+  // вечно) и что повторный вызов безопасен.
+  const { deleteAllUserData, addWatchItem, listWatchItems } = await import('./lib/watch.js');
+  const { disableConfirmText, disabledText, mainReplyKeyboard, DISABLE_BUTTON } = await import('./lib/menus.js');
+  const victim = 900002;
+  const neighbour = 900003;
+  await deleteAllUserData(victim);
+  await deleteAllUserData(neighbour);
+
+  await db.insert(users).values([{ chatId: victim }, { chatId: neighbour }]).run();
+  const v1 = await addWatchItem({ chatId: victim, kind: 'query', query: 'театр' });
+  const v2 = await addWatchItem({ chatId: victim, kind: 'venue', query: 'Молодёжный театр', eventUrl: 'https://24afisha.by/ru/object/332-x' });
+  const n1 = await addWatchItem({ chatId: neighbour, kind: 'query', query: 'кино' });
+  await db.insert(notifications).values([
+    { chatId: victim, eventId: 1, dedupeKey: 'ev:del-victim:1' },
+    { chatId: neighbour, eventId: 2, dedupeKey: 'ev:del-neighbour:1' },
+  ]).run();
+  await db.insert(venueQueue).values([
+    { watchItemId: v1.row.id, chatId: victim, slug: '332-x', url: 'https://24afisha.by/ru/object/332-x', dueAt: 0 },
+    { watchItemId: v2.row.id, chatId: victim, slug: '4950-z', url: 'https://24afisha.by/ru/object/4950-z', dueAt: 0 },
+    { watchItemId: n1.row.id, chatId: neighbour, slug: '999-y', url: 'https://24afisha.by/ru/object/999-y', dueAt: 0 },
+  ]).run();
+
+  const del = await deleteAllUserData(victim);
+  assert.equal(del.watchItems, 2, 'both positions deleted');
+  assert.equal(del.venueQueue, 2, 'queue rows of the chat and of its positions deleted');
+  assert.equal(del.notifications, 1, 'notification history deleted');
+  assert.equal(del.users, 1, 'user row deleted');
+  assert.equal((await listWatchItems(victim)).length, 0, 'no positions left for the user');
+  assert.equal((await db.select().from(users).where(eq(users.chatId, victim)).all()).length, 0, 'user record gone');
+  // Чужой пользователь не затронут.
+  assert.equal((await listWatchItems(neighbour)).length, 1, 'neighbour keeps their position');
+  assert.equal((await db.select().from(users).where(eq(users.chatId, neighbour)).all()).length, 1, 'neighbour user kept');
+  assert.equal((await db.select().from(venueQueue).where(eq(venueQueue.chatId, neighbour)).all()).length, 1, 'neighbour queue kept');
+  assert.equal((await db.select().from(notifications).where(eq(notifications.chatId, neighbour)).all()).length, 1, 'neighbour notifications kept');
+  // Повторный клик по «удалить» не должен падать.
+  const delAgain = await deleteAllUserData(victim);
+  assert.equal(delAgain.watchItems, 0, 'repeated deletion is a no-op');
+  await deleteAllUserData(neighbour);
+
+  // Подтверждение обязанно называть число позиций (иначе человек не понимает,
+  // что именно потеряет) и не должно обещать удаление кнопкой без вопроса.
+  assert.ok(disableConfirmText(3).includes('3 позиции'), 'confirm names the item count');
+  assert.ok(disableConfirmText(5).includes('5 позиций'), 'confirm handles plural');
+  assert.ok(disabledText(del).includes('удалены'), 'result confirms deletion');
+  assert.ok(JSON.stringify(mainReplyKeyboard('https://x', false)).includes(DISABLE_BUTTON), 'disable button present in reply keyboard');
+
   // Отчёт: разбивка «в продаже» — по источникам, а не все события кэша; обход
   // площадок, прерванный по бюджету, не выдаёт себя за прерывание по времени.
   const report = formatReport({
@@ -351,7 +403,7 @@ async function main() {
   const empty = formatReport({ ...healthBase, checks: { ...healthBase.checks, health: { cycles: 0 } } });
   assert.ok(!empty.includes('🩺'), 'health block hidden without cycles');
 
-  console.log('✅ smoke PASS: db works (insert/onConflict/returning/filter/count/update/delete/order) + list render (emoji/links/deep-link) + venue query matching + budget counters + blocked-chat delivery + stats report + health block');
+  console.log('✅ smoke PASS: db works (insert/onConflict/returning/filter/count/update/delete/order) + list render (emoji/links/deep-link) + venue query matching + budget counters + blocked-chat delivery + account deletion + stats report + health block');
 }
 
 main()

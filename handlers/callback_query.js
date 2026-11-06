@@ -1,6 +1,6 @@
 import { api } from '../api.js';
-import { HELP, helpKeyboard, renderWatchlist, mainMenuKeyboard, NO_LINK_PREVIEW } from '../lib/menus.js';
-import { listWatchItems, removeWatchItem, deactivateWatchItem, getWatchItem, miniAppUrl, miniAppConfigured, SOURCE_LABEL } from '../lib/watch.js';
+import { HELP, helpKeyboard, renderWatchlist, mainMenuKeyboard, mainReplyKeyboard, NO_LINK_PREVIEW, disableConfirmText, disableConfirmKeyboard, disabledText } from '../lib/menus.js';
+import { listWatchItems, removeWatchItem, deactivateWatchItem, getWatchItem, miniAppUrl, miniAppConfigured, SOURCE_LABEL, deleteAllUserData } from '../lib/watch.js';
 import { addWatchItem } from '../lib/watch.js';
 import { sendFreshReplyKeyboard } from '../lib/reply.js';
 import { startFeedback, clearFeedback } from '../lib/feedback.js';
@@ -195,6 +195,62 @@ export default async function (cb) {
     // Единственное подтверждение — сообщение со свежей reply-клавиатурой
     // (свежий снапшот списка Mini App). Текст отдельным sendMessage не дублируем.
     await sendFreshReplyKeyboard(chatId, text);
+    return;
+  }
+
+  // ── «Отключить бота»: полное удаление данных пользователя ──────────────────
+  // Три шага: account:disable → показываем подтверждение со счётчиком позиций;
+  // :yes → удаляем и убираем клавиатуру; :no → возвращаем обычные кнопки.
+  // Удаление необратимо, поэтому между кнопкой и удалением всегда стоит вопрос.
+  if (data === 'account:disable') {
+    const items = await listWatchItems(chatId);
+    const text = disableConfirmText(items.length);
+    const kb = disableConfirmKeyboard();
+    if (isEditable) {
+      await api.editMessageText({ chat_id: chatId, message_id: msgId, text, parse_mode: 'HTML', reply_markup: kb });
+    } else {
+      await api.sendMessage({ chat_id: chatId, text, parse_mode: 'HTML', reply_markup: kb });
+    }
+    return;
+  }
+
+  if (data === 'account:disable:no') {
+    // Ничего не удаляем. Возвращаем обычный экран, чтобы в чате не остался
+    // «страшный» вопрос с кнопкой удаления.
+    const items = await listWatchItems(chatId);
+    const text = '👍 Хорошо, ничего не удаляю. Продолжаю следить за билетами.';
+    const kb = mainReplyKeyboard(miniAppUrl(items), miniAppConfigured());
+    if (isEditable) {
+      await api.editMessageText({ chat_id: chatId, message_id: msgId, text, parse_mode: 'HTML', reply_markup: { inline_keyboard: [] } });
+      await api.sendMessage({ chat_id: chatId, text: 'Кнопки на месте 👇', reply_markup: kb });
+    } else {
+      await api.sendMessage({ chat_id: chatId, text, parse_mode: 'HTML', reply_markup: kb });
+    }
+    return;
+  }
+
+  if (data === 'account:disable:yes') {
+    const counts = await deleteAllUserData(chatId);
+    console.log(`[account] chat ${chatId} отключил бота: удалено позиций ${counts.watchItems}, очередки площадок ${counts.venueQueue}, уведомлений ${counts.notifications}`);
+    // Сначала снимаем кнопки со «страшного» вопроса (если сообщение можно править),
+    // затем убираем reply-клавиатуру: иначе «Мой список»/«Отключить бота» останутся
+    // под полем ввода у человека, который только что попросил всё стереть.
+    if (isEditable) {
+      try {
+        await api.deleteMessage({ chat_id: chatId, message_id: msgId });
+      } catch {
+        try {
+          await api.editMessageReplyMarkup({ chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [] } });
+        } catch { /* сообщение могло исчезнуть */ }
+      }
+    }
+    await api.sendMessage({
+      chat_id: chatId,
+      text: disabledText(counts),
+      parse_mode: 'HTML',
+      // Пустая reply-клавиатура: убирает постоянные кнопки под полем ввода.
+      reply_markup: { remove_keyboard: true },
+    });
     return;
   }
 }

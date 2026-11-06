@@ -6,6 +6,7 @@ import {
   WELCOME, HELP, helpKeyboard,
   mainMenuKeyboard, mainReplyKeyboard, proposeAddKeyboard, proposeAddText,
   renderWatchlist, unsubConfirmText, unsubConfirmKeyboard, NO_LINK_PREVIEW,
+  disableConfirmText, disableConfirmKeyboard, DISABLE_BUTTON,
 } from '../lib/menus.js';
 import { listWatchItems, miniAppUrl, miniAppConfigured, getWatchItem } from '../lib/watch.js';
 import { handleWebAppData } from '../lib/webapp.js';
@@ -114,10 +115,25 @@ export default async function (message) {
     return;
   }
 
+  // «🚪 Отключить бота» — кнопка reply-клавиатуры (текст) и команда /stop.
+  // Само удаление НЕ делаем здесь: показываем подтверждение, а стираем данные
+  // только по нажатию «Да, удалить всё» (account:disable:yes). Так случайный тап
+  // по кнопке не уничтожает подписки.
+  if (text === DISABLE_BUTTON || text === '/stop' || text === '/unsubscribe') {
+    const items = await listWatchItems(chatId);
+    await api.sendMessage({
+      chat_id: chatId,
+      text: disableConfirmText(items.length),
+      parse_mode: 'HTML',
+      reply_markup: disableConfirmKeyboard(),
+    });
+    return;
+  }
+
   if (text.startsWith('/')) {
     await api.sendMessage({
       chat_id: chatId,
-      text: 'Не знаю такую команду. Доступны: /start, /list, /stats, /help',
+      text: 'Не знаю такую команду. Доступны: /start, /list, /stats, /help, /stop',
     });
     return;
   }
