@@ -1062,33 +1062,51 @@
     $('wl-count').textContent = watchlist.length ? '(' + watchlist.length + ')' : '';
     $('wl-empty').classList.toggle('hidden', watchlist.length > 0);
     $('wl-items').innerHTML = watchlist.map(function (i) {
+      // Идентификатор позиции приходит из снапшота (`wl=` в адресе кнопки) —
+      // это ВНЕШНИЕ данные, а он подставляется в атрибуты `data-id`/`data-del`.
+      // Без экранирования `i.i = '" onmouseover="…'` выходил из кавычек атрибута
+      // и выполнял скрипт в контексте нашего домена (js/xss). Приводим к числу:
+      // id позиции — целое, всё остальное в снапшоте бессмысленно, и это же
+      // сравнение использует обработчик «Удалить» (i.i !== id).
+      const itemId = Number(i.i);
+      if (!isFinite(itemId)) return '';
       // Для события с известной категорией (кино/театр/концерт/…) показываем её
       // вместо обобщённого «событие», чтобы было видно, что это за событие.
       const kindLabel = (i.k === 'event' && i.g) ? i.g : (KIND[i.k] || i.k);
       const cityPart = i.c ? ' · ' + esc(cityLabelStatic(i.c)) : '';
       // Кнопка «Открыть страницу» — только когда отслеживается конкретное
       // событие/площадка и у него есть URL страницы (i.u приходит из снапшота).
-      const openBtn = (i.k === 'event' || i.k === 'venue') && i.u
-        ? '<a class="btn ghost" href="' + esc(i.u) + '" target="_blank" rel="noopener">Открыть</a>'
+      // esc() обязателен: адрес попадает внутрь href="…", и `"` в нём вывел бы
+      // из атрибута. javascript: отсекаем отдельно — это не просто экранирование.
+      const safeUrl = (function (u) {
+        const s = String(u || '').trim();
+        return /^https?:\/\//i.test(s) ? s : '';
+      })(i.u);
+      const openBtn = (i.k === 'event' || i.k === 'venue') && safeUrl
+        ? '<a class="btn ghost" href="' + esc(safeUrl) + '" target="_blank" rel="noopener">Открыть</a>'
         : '';
       // Постер события/площадки (i.m приходит из снапшота), как в карточке поиска.
       // У события/площадки есть реальное превью либо плейсхолдер; у ключевого
       // слова своего постера нет (i.m для query всегда null) — показываем заглушку.
-      const thumb = i.m
-        ? '<img class="thumb" src="' + esc(i.m) + '" alt="" loading="lazy">'
+      const safeImg = (function (u) {
+        const s = String(u || '').trim();
+        return /^https?:\/\//i.test(s) ? s : '';
+      })(i.m);
+      const thumb = safeImg
+        ? '<img class="thumb" src="' + esc(safeImg) + '" alt="" loading="lazy">'
         : (i.k === 'event' ? '<div class="thumb placeholder">🎫</div>'
           : (i.k === 'venue' ? '<div class="thumb placeholder">🏟</div>'
             : '<div class="thumb placeholder">🔍</div>'));
       // Кнопки «Открыть»/«Удалить» кладём под текст/почерк (как кнопки действия
       // .actions в карточках поиска), а не в один ряд справа от названия.
-      return '<div class="watch-item" data-id="' + i.i + '">' +
+      return '<div class="watch-item" data-id="' + itemId + '">' +
           thumb +
           '<div class="t">' +
             '<div class="name">' + esc(i.t) + '</div>' +
             '<div class="meta">' + esc(kindLabel) + ' · ' + esc(SRC[i.s] || i.s) + cityPart + '</div>' +
             '<div class="actions">' +
               openBtn +
-              '<button class="btn del" data-del="' + i.i + '">Удалить</button>' +
+              '<button class="btn del" data-del="' + itemId + '">Удалить</button>' +
             '</div>' +
           '</div>' +
         '</div>';

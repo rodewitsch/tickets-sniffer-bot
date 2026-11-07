@@ -18,6 +18,12 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# GITHUB_TOKEN не нужен ни для чего, кроме чтения кода: деплой идёт по SSH с
+# секретами. Явный минимум закрывает actions/missing-workflow-permissions — по
+# умолчанию токен получает права на запись в репозиторий и пакеты.
+permissions:
+  contents: read
+
 jobs:
   deploy:
     runs-on: ubuntu-latest

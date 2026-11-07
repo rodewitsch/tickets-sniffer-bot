@@ -124,7 +124,11 @@ async function handleCheck(req, res, url) {
     sendJson(res, 200, { ok: true, ...result });
   } catch (err) {
     console.error('cron check error:', err);
-    sendJson(res, 500, { ok: false, error: String(err && err.message || err) });
+    // Наружу — НЕ текст исключения (CodeQL js/stack-trace-exposure): в нём
+    // бывают пути файлов, внутренние URL, id чатов и обрывки ответов Telegram.
+    // Список специфичных полей намеренно фиксированный: `...result` выше
+    // собирается кодом, а не исключением, но err — внешние данные по смыслу.
+    sendJson(res, 500, { ok: false, error: 'check_failed' });
   }
 }
 

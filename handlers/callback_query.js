@@ -4,7 +4,7 @@ import { listWatchItems, removeWatchItem, deactivateWatchItem, getWatchItem, min
 import { addWatchItem } from '../lib/watch.js';
 import { sendFreshReplyKeyboard } from '../lib/reply.js';
 import { startFeedback, clearFeedback } from '../lib/feedback.js';
-import { escapeHtml } from '../lib/util.js';
+import { escapeHtml, stripTags } from '../lib/util.js';
 
 // Промпт режима ввода обращения + кнопка «Отмена» (инлайн на том же сообщении).
 const FEEDBACK_PROMPT_TEXT =
@@ -17,16 +17,44 @@ function feedbackPromptKeyboard() {
 // Название события из карточки уведомления — только для показа в списке
 // заглушённого («что я выключил»). Заголовок карточки идёт третьей строкой
 // после «🎫 Появились билеты!» и пустой строки (см. ticketCaption).
+//
+// Здесь НЕТ санитайзинга с последующим разэкранированием. Раньше было так:
+//   candidate.replace(/<\/?[^>]+>/g, '')            ← «удалить теги»
+//     .replace(/&lt;/g, '<') … .replace(/&#39;/g, "'")
+// Это два бага сразу (CodeQL: js/incomplete-multi-character-sanitization и
+// js/double-escaping):
+//   • после удаления тегов строка СНОВА получала `<` из `&lt;`, то есть
+//     «очищенная» строка могла содержать `<script` и HTML вообще;
+//   • `&amp;lt;` превращался в `&lt;`, а затем в `<` — двойная расшифровка.
+// Но эта строка никогда не уходит как HTML: получатель кладёт caption в
+// `text` сообщения с parse_mode:'HTML' и сам вызывает escapeHtml (см.
+// renderMutedEvents в lib/menus.js), поэтому возвращаем ЧИСТЫЙ ТЕКСТ:
+// убираем теги (stripTags — до неподвижной точки) и расшифровываем
+// HTML-сущности ОДИН раз. `<` остаётся символом и будет экранирован позже.
+const CAPTION_ENTITIES = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
+};
+function decodeOnce(text) {
+  return String(text || '').replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, body) => {
+    const key = body.toLowerCase();
+    if (key.startsWith('#x')) return safeCodePoint(parseInt(key.slice(2), 16)) ?? m;
+    if (key.startsWith('#')) return safeCodePoint(parseInt(key.slice(1), 10)) ?? m;
+    return CAPTION_ENTITIES[key] ?? m;
+  });
+}
+function safeCodePoint(code) {
+  if (!Number.isFinite(code) || code <= 0 || code > 0x10ffff) return null;
+  // Управляющие символы в подпись не нужны: они только портят вывод.
+  if (code < 0x20 && code !== 0x09 && code !== 0x0a) return null;
+  try { return String.fromCodePoint(code); } catch { return null; }
+}
+
 function titleFromNotification(cb) {
   const caption = cb.message?.caption || cb.message?.text || '';
   const lines = caption.split('\n').map((l) => l.trim()).filter(Boolean);
   // ['🎫 Появились билеты!', '<b>Название</b>', '📅 …', '📍 …'] — берём вторую.
   const candidate = lines[1] || '';
-  const clean = candidate
-    .replace(/<\/?[^>]+>/g, '')
-    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
-    .trim();
+  const clean = decodeOnce(stripTags(candidate)).replace(/\s+/g, ' ').trim();
   return clean ? clean.slice(0, 200) : null;
 }
 
