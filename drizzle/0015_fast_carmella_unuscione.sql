@@ -1,0 +1,1 @@
+ALTER TABLE `watch_items` ADD `fail_streak` integer DEFAULT 0;
