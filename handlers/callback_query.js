@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { HELP, helpKeyboard, renderWatchlist, mainMenuKeyboard, mainReplyKeyboard, NO_LINK_PREVIEW, disableConfirmText, disableConfirmKeyboard, disabledText, renderMutedEvents, mutedEventsKeyboard } from '../lib/menus.js';
+import { HELP, helpKeyboard, renderWatchlist, mainMenuKeyboard, mainReplyKeyboard, NO_LINK_PREVIEW, disableConfirmText, disableConfirmKeyboard, disabledText, renderMutedEvents, mutedEventsKeyboard, notificationKey, CALLBACK_DATA_TRUNCATED } from '../lib/menus.js';
 import { listWatchItems, removeWatchItem, deactivateWatchItem, getWatchItem, miniAppUrl, miniAppConfigured, SOURCE_LABEL, deleteAllUserData, muteEvent, listMutedEvents, unmuteEvent, unmuteAllEvents } from '../lib/watch.js';
 import { addWatchItem } from '../lib/watch.js';
 import { sendFreshReplyKeyboard } from '../lib/reply.js';
@@ -47,6 +47,41 @@ function safeCodePoint(code) {
   // Управляющие символы в подпись не нужны: они только портят вывод.
   if (code < 0x20 && code !== 0x09 && code !== 0x0a) return null;
   try { return String.fromCodePoint(code); } catch { return null; }
+}
+
+// Метка «значение в кнопку не влезло — возьми его из текста сообщения»
+// (см. ticketKeyboard / proposeAddKeyboard в lib/menus.js). «!» не входит в
+// base64url, поэтому метку нельзя спутать с настоящим ключом.
+const TRUNCATED_KEY = CALLBACK_DATA_TRUNCATED;
+
+// Ключ антидубля, восстановленный из подписи карточки.
+//
+// Зачем: callback_data ограничен 64 байтами, а ключ содержит нормализованное
+// НАЗВАНИЕ события (у «Представление у Ёлки … Белоснежка …» он весил 256 байт
+// в base64url). Такая кнопка ломала отправку ВСЕГО сообщения (400
+// BUTTON_DATA_INVALID), поэтому длинные ключи в кнопку не кладутся.
+//
+// Карточка содержит то же, из чего ключ собран: 2-я строка — название
+// (notificationKey нормализует его через normText), а дата — в строке «📅 …»,
+// которая в точности равна events.dateText, то есть «ДД.ММ.ГГГГ ЧЧ:ММ».
+// День считаем в UTC из этой даты. Если что-то не разобралось — возвращаем
+// null: лучше не заглушить, чем заглушить не то событие.
+function dedupeKeyFromCard(cardText) {
+  const lines = String(cardText || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  if (lines.length < 2) return null;
+  // ['🎫 Появились билеты!', '<b>Название</b>', '📅 …', '📍 …', '', '<i>источник</i>']
+  const titleLine = lines[1].replace(/^<b>|<\/b>$/g, '');
+  const title = decodeOnce(stripTags(titleLine)).replace(/\s+/g, ' ').trim();
+  if (!title) return null;
+  const dateLine = lines.find((l) => l.startsWith('📅')) || '';
+  const m = /(\d{2})\.(\d{2})\.(\d{4})(?:\s+(\d{2}):(\d{2}))?/.exec(dateLine);
+  if (!m) return null;
+  const [, dd, mo, yy, hh = '00', mi = '00'] = m;
+  // Беларусь = UTC+3, сутки считаются по UTC — та же арифметика, что в
+  // notificationKey (Math.floor(startsAt / 86400)). Карточка показывает
+  // локальное время, поэтому переводим обратно в UTC.
+  const utcMs = Date.UTC(Number(yy), Number(mo) - 1, Number(dd), Number(hh), Number(mi)) - 3 * 3600 * 1000;
+  return notificationKey({ title, startsAt: Math.floor(utcMs / 1000) });
 }
 
 function titleFromNotification(cb) {
@@ -206,6 +241,15 @@ export default async function (cb) {
     try {
       query = Buffer.from(parts.slice(2).join(':'), 'base64url').toString('utf8').trim();
     } catch { query = ''; }
+    // Метка «запрос в кнопку не влез — он есть в тексте сообщения»
+    // (см. proposeAddKeyboard в lib/menus.js). Без этого длинный запрос давал
+    // те же 400 BUTTON_DATA_INVALID на всё сообщение, что и у «Больше не
+    // уведомлять»: кнопки выбора источника просто не отправлялись.
+    if (query === TRUNCATED_KEY) {
+      const msgText = cb.message?.text || '';
+      const m = /Добавить «([\s\S]*)» в отслеживание/.exec(msgText);
+      query = m ? decodeOnce(stripTags(m[1])).trim() : '';
+    }
     if (!query) return;
     const res = await addWatchItem({ chatId, kind: 'query', source, query });
     const text = res?.duplicate
@@ -240,7 +284,11 @@ export default async function (cb) {
   if (data.startsWith('mute:')) {
     const parts = data.split(':');
     const watchId = Number(parts[1]);
-    const keyB64 = parts[2];
+    let keyB64 = parts[2];
+    // Длинный ключ в кнопку не влезает (Telegram: 64 байта на callback_data) —
+    // тогда кнопка несёт `mute:<id>:!` («!» = восстановить ключ из карточки).
+    // Обычный base64url-ключ «!» содержать не может, так что метка однозначна.
+    if (keyB64 === TRUNCATED_KEY) keyB64 = '';
     let dedupeKey = '';
     if (keyB64) {
       try {
@@ -250,6 +298,16 @@ export default async function (cb) {
 
     // Владельца проверяем по chatId (FK в SQLite нет): чужая кнопка ничего не сделает.
     const item = Number.isFinite(watchId) ? await getWatchItem(chatId, watchId) : null;
+
+    // Ключ не пришёл в кнопке (длинное название) — восстанавливаем из карточки:
+    // заголовок и дата в ней те же, из которых notificationKey и строился.
+    // Редактировать карточку может только сам бот, поэтому её текст — наши данные.
+    if (!dedupeKey && data === `mute:${watchId}:${TRUNCATED_KEY}`) {
+      try {
+        const fromCard = dedupeKeyFromCard(cb.message?.caption || cb.message?.text || '');
+        if (fromCard) dedupeKey = fromCard;
+      } catch { dedupeKey = ''; }
+    }
 
     if (dedupeKey) {
       // Владелец позиции должен совпадать с нажавшим: иначе по чужой карточке

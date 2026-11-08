@@ -336,16 +336,39 @@ async function main() {
   const word = await addWatchItem({ chatId: muteChat, kind: 'query', query: 'театр' });
   const keyA = 'ev:цветы для элджернона:20740';
   const keyB = 'ev:ревизор:20741';
+  // Короткий ключ, который ГАРАНТИРОВАННО влезает в callback_data (64 байта
+  // вместе с `mute:<id>:`): длинные ключи заменяются меткой и восстанавливаются
+  // из карточки, поэтому «ключ доехал в кнопке» проверяем на коротком.
+  const keyShort = 'ev:чайка:20768';
 
   // Кнопка несёт и позицию (найти владельца), и ключ события (что глушить).
-  const kb = ticketKeyboard({ source: 'afisha', url: 'https://24afisha.by/ru/minsk/event/x' }, word.row.id, keyA);
+  const kb = ticketKeyboard({ source: 'afisha', url: 'https://24afisha.by/ru/minsk/event/x' }, word.row.id, keyShort);
   const muteBtn = kb.inline_keyboard.flat().find((b) => (b.callback_data || '').startsWith('mute:'));
   assert.ok(muteBtn, 'mute button rendered when the event key is known');
   assert.equal(
     Buffer.from(muteBtn.callback_data.split(':')[2], 'base64url').toString('utf8'),
-    keyA,
+    keyShort,
     'callback_data carries the event key',
   );
+  // Telegram пускает в callback_data не больше 64 БАЙТ, иначе 400
+  // BUTTON_DATA_INVALID на ВСЁ сообщение (так «сломались» две площадки в проде:
+  // failStreak 52 и 61, а ошибка выглядела как сбой площадки). Длинный ключ
+  // заменяется меткой, ключ восстанавливается из карточки.
+  for (const longTitle of [
+    'Цветы для Элджернона',
+    'Старая волшебная сказка',
+    'Представление у Ёлки "Где же ты, Снегурочка?". Премьера спектакля "Белоснежка. Новогодняя история"',
+  ]) {
+    const longKey = `ev:${longTitle.toLowerCase().replace(/ё/g, 'е')}:20860`;
+    const longKb = ticketKeyboard({ source: 'afisha', url: 'https://24afisha.by/ru/minsk/event/x' }, word.row.id, longKey);
+    for (const b of longKb.inline_keyboard.flat()) {
+      if (!b.callback_data) continue;
+      assert.ok(
+        Buffer.byteLength(b.callback_data, 'utf8') <= 64,
+        `callback_data fits Telegram's 64-byte limit (${Buffer.byteLength(b.callback_data, 'utf8')}B): ${JSON.stringify(longTitle)}`,
+      );
+    }
+  }
   // Без ключа события глушить нечего — кнопку не показываем.
   const kbNoKey = ticketKeyboard({ source: 'afisha', url: 'https://x' }, word.row.id);
   assert.ok(!kbNoKey.inline_keyboard.flat().some((b) => (b.callback_data || '').startsWith('mute:')), 'no mute button without an event key');
