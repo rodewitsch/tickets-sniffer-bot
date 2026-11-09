@@ -373,6 +373,37 @@ async function main() {
   const kbNoKey = ticketKeyboard({ source: 'afisha', url: 'https://x' }, word.row.id);
   assert.ok(!kbNoKey.inline_keyboard.flat().some((b) => (b.callback_data || '').startsWith('mute:')), 'no mute button without an event key');
 
+  // ── failStreak: счётчик текущего состояния, а не вечная отметина ──────────
+  // В проде позиции показывали «71 падение подряд», хотя неделю не проверялись
+  // (их чат заблокировал бота), и AI-разбор советовал чинить рабочий адрес.
+  const { bumpWatchItemFailures, clearStaleFailStreaks, markWatchItemChecked } = await import('./lib/watch.js');
+  const streakId = word.row.id;
+  for (let i = 0; i < 4; i++) await bumpWatchItemFailures(streakId);
+  let streakRow = await db.select().from(watchItems).where(eq(watchItems.id, streakId)).get();
+  assert.equal(streakRow.failStreak, 4, 'failStreak accumulates on failures');
+  // Успешная проверка сбрасывает серию И долг.
+  await markWatchItemChecked(streakId);
+  streakRow = await db.select().from(watchItems).where(eq(watchItems.id, streakId)).get();
+  assert.equal(streakRow.failStreak, 0, 'successful check resets failStreak');
+  // Серия, зависшая у позиции без проверок дольше суток, обнуляется уборкой.
+  // Свежая серия (проверялась 2 часа назад) должна ПЕРЕЖИТЬ уборку…
+  await db.update(watchItems)
+    .set({ failStreak: 71, lastCheckedAt: Math.floor(Date.now() / 1000) - 7200 })
+    .where(eq(watchItems.id, streakId))
+    .run();
+  assert.equal(await clearStaleFailStreaks(24 * 60 * 60), 0, 'fresh streak is not cleared');
+  streakRow = await db.select().from(watchItems).where(eq(watchItems.id, streakId)).get();
+  assert.equal(streakRow.failStreak, 71, 'recent streak survives the sweep');
+  // …а протухшая (сутки без проверок) — обнуляется.
+  await db.update(watchItems)
+    .set({ lastCheckedAt: Math.floor(Date.now() / 1000) - 48 * 3600 })
+    .where(eq(watchItems.id, streakId))
+    .run();
+  const clearedCount = await clearStaleFailStreaks(24 * 60 * 60);
+  assert.ok(clearedCount >= 1, 'stale failStreak is cleared');
+  streakRow = await db.select().from(watchItems).where(eq(watchItems.id, streakId)).get();
+  assert.equal(streakRow.failStreak, 0, 'stale streak reset to zero');
+
   await muteEvent({ chatId: muteChat, dedupeKey: keyA, title: 'Цветы для Элджернона' });
   assert.equal(await isEventMuted(muteChat, keyA), true, 'muted event is flagged');
   assert.equal(await isEventMuted(muteChat, keyB), false, 'other events of the same keyword stay active');
