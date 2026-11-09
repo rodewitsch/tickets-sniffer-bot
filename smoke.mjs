@@ -279,6 +279,28 @@ async function main() {
   // «сирот» в venue_queue после удаления позиций (иначе обход ходил бы по ним
   // вечно) и что повторный вызов безопасен.
   const { deleteAllUserData, addWatchItem, listWatchItems } = await import('./lib/watch.js');
+
+  // Позиции заблокированного чата не должны попадать в «залипшие»: их пропуск —
+  // осознанное решение, а не голод. Иначе отчёт каждый день показывал бы
+  // «залипшие позиции 🟡» для 9 из 22 позиций (в проде так и было).
+  {
+    const { collectStats } = await import('./lib/stats.js');
+    const stuckChat = 900002;
+    const freshChat = 900003;
+    await db.insert(users).values({ chatId: stuckChat, blockedAt: Math.floor(Date.now() / 1000) }).run();
+    await db.insert(users).values({ chatId: freshChat }).run();
+    const oldTs = Math.floor(Date.now() / 1000) - 72 * 3600;
+    await addWatchItem({ chatId: stuckChat, kind: 'query', query: 'залипший-блок' });
+    await addWatchItem({ chatId: freshChat, kind: 'query', query: 'залипший-живой' });
+    await db.update(watchItems).set({ lastCheckedAt: oldTs }).where(eq(watchItems.chatId, stuckChat)).run();
+    await db.update(watchItems).set({ lastCheckedAt: oldTs }).where(eq(watchItems.chatId, freshChat)).run();
+    const statsNow = await collectStats();
+    const stuckTitles = statsNow.checks.health.stuckItems.map((s) => s.title);
+    assert.ok(!stuckTitles.includes('залипший-блок'), 'blocked chat positions are not reported as stuck');
+    assert.ok(stuckTitles.includes('залипший-живой'), 'genuinely stuck position is still reported');
+    await deleteAllUserData(stuckChat);
+    await deleteAllUserData(freshChat);
+  }
   const { disableConfirmText, disabledText, mainReplyKeyboard, DISABLE_BUTTON } = await import('./lib/menus.js');
   const victim = 900002;
   const neighbour = 900003;
