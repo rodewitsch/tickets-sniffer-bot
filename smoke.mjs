@@ -298,6 +298,21 @@ async function main() {
     const stuckTitles = statsNow.checks.health.stuckItems.map((s) => s.title);
     assert.ok(!stuckTitles.includes('залипший-блок'), 'blocked chat positions are not reported as stuck');
     assert.ok(stuckTitles.includes('залипший-живой'), 'genuinely stuck position is still reported');
+
+    // Долг у заблокированного чата не имеет смысла: позицию не проверяют, значит
+    // «отработать» его она не может. Остатки сбрасываются (в проде три позиции
+    // висели с deferStreak 1 и разбор советовал поднять им приоритет).
+    const { bumpWatchItemDefer, clearBlockedChatDebt } = await import('./lib/watch.js');
+    const blockedItem = (await listWatchItems(stuckChat))[0];
+    await bumpWatchItemDefer(blockedItem.id);
+    const liveItem = (await listWatchItems(freshChat))[0];
+    await bumpWatchItemDefer(liveItem.id);
+    await clearBlockedChatDebt();
+    const blockedAfter = (await db.select().from(watchItems).where(eq(watchItems.id, blockedItem.id)).get());
+    const liveAfter = (await db.select().from(watchItems).where(eq(watchItems.id, liveItem.id)).get());
+    assert.equal(blockedAfter.deferStreak, 0, 'blocked chat debt is cleared');
+    assert.equal(liveAfter.deferStreak, 1, 'debt of a live chat is kept');
+
     await deleteAllUserData(stuckChat);
     await deleteAllUserData(freshChat);
   }
