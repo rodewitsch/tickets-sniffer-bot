@@ -20,13 +20,17 @@ export default async function (message) {
   const chat = message.chat;
   const chatId = chat.id;
 
-  // Данные из Mini App приходят как поле Message.web_app_data.
-  if (message.web_app_data && message.web_app_data.data) {
-    console.log('[webapp] got web_app_data from chat', chatId, 'button:', message.web_app_data.button_text, 'len:', message.web_app_data.data.length);
-    await handleWebAppData(chatId, message.web_app_data.data);
-    return;
-  }
-
+  // Регистрация и отметка активности — ДО ветвления на Mini App.
+  //
+  // Раньше upsert стоял ниже проверки web_app_data, и всё, что пользователь
+  // делал в Mini App (добавление и удаление позиций, поиск), выходило раньше
+  // по коду: lastSeenAt не обновлялся вовсе. В проде это выглядело как
+  // «активных за 24 ч — 1» при 49 пользователях и 22 живых позициях.
+  //
+  // insert + onConflictDoUpdate, а не onConflictDoNothing: базовая строка (и
+  // users.created_at) создаётся один раз, дальше обновляется только lastSeenAt.
+  // Если юзера удалило автоудаление при 403, он заводится заново — блокировка
+  // после этого уже не действует.
   await db
     .insert(users)
     .values({
@@ -36,9 +40,22 @@ export default async function (message) {
     })
     .onConflictDoUpdate({
       target: users.chatId,
-      set: { lastSeenAt: sql`unixepoch()` },
+      // blockedAt снимаем здесь же: обращение к боту = пользователь вернулся.
+      // CASE, а не просто NULL: колонка не должна меняться на каждом апдейте
+      // (иначе перезаписываем строку зря у всех, кто и так не блокирован).
+      set: {
+        lastSeenAt: sql`unixepoch()`,
+        blockedAt: sql`CASE WHEN ${users.blockedAt} IS NOT NULL THEN NULL ELSE ${users.blockedAt} END`,
+      },
     })
     .run();
+
+  // Данные из Mini App приходят как поле Message.web_app_data.
+  if (message.web_app_data && message.web_app_data.data) {
+    console.log('[webapp] got web_app_data from chat', chatId, 'button:', message.web_app_data.button_text, 'len:', message.web_app_data.data.length);
+    await handleWebAppData(chatId, message.web_app_data.data);
+    return;
+  }
 
   const text = (message.text || '').trim();
 

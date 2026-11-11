@@ -249,18 +249,28 @@ async function main() {
   const { isBlockedError, isChatDeliverable, markChatBlocked, markChatDeliverable, shouldProbeBlockedChat, resetBlockedCache } = await import('./lib/delivery.js');
   const blockedChatId = 900001;
   await db.insert(users).values({ chatId: blockedChatId }).run();
+  await db.insert(watchItems).values({ chatId: blockedChatId, kind: 'query', query: 'стас михайлов' }).run();
   assert.equal(await isChatDeliverable(blockedChatId), true, 'new chat is deliverable');
   await markChatBlocked(blockedChatId);
-  assert.equal(await isChatDeliverable(blockedChatId), false, 'blocked chat is skipped');
-  // Пробная отправка (раз в сутки) не должна срабатывать сразу после пометки.
+  // 403 = удаление данных, а не пометка: подписки того, кто заблокировал бота,
+  // ему не нужны, а в отчёте они каждый день выглядели «мёртвыми позициями».
+  const blockedUser = await db.select().from(users).where(eq(users.chatId, blockedChatId)).get();
+  assert.equal(blockedUser, undefined, 'blocked chat user row deleted');
+  const blockedItems = await db.select().from(watchItems).where(eq(watchItems.chatId, blockedChatId)).all();
+  assert.equal(blockedItems.length, 0, 'blocked chat watch items deleted');
+  // Строки users больше нет — второй вызов просто ничего не находит.
+  await markChatBlocked(blockedChatId);
+  // Без строки в users чат считается доставляемым: удалять больше нечего.
+  assert.equal(await isChatDeliverable(blockedChatId), true, 'deleted chat is not skipped (nothing to check)');
+  // Пробная отправка не нужна и не должна зацикливаться.
   resetBlockedCache();
-  assert.equal(await shouldProbeBlockedChat(blockedChatId), false, 'no immediate probe after blocking');
+  assert.equal(await shouldProbeBlockedChat(blockedChatId), true, 'deleted chat may be sent to');
   // Чат не в базе (старые пользователи) — считаем доставляемым, как раньше.
   assert.equal(await isChatDeliverable(123456789), true, 'unknown chat is deliverable');
   resetBlockedCache();
   assert.equal(await shouldProbeBlockedChat(123456789), true, 'unknown chat may be sent to');
+  // markChatDeliverable по несуществующей строке — no-op, не падает.
   await markChatDeliverable(blockedChatId);
-  assert.equal(await isChatDeliverable(blockedChatId), true, 'unblocked chat becomes deliverable again');
   // Распознавание 403: код ошибки и текст Telegram.
   assert.equal(isBlockedError({ code: 403 }), true, '403 by code');
   assert.equal(isBlockedError({ message: 'sendMessage: Forbidden: bot was blocked by the user (403)' }), true, '403 by message');

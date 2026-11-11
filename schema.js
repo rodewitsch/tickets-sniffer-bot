@@ -192,7 +192,13 @@ export const checkLog = sqliteTable(
     venueEventsTruncated: integer('venue_events_truncated').default(0),
     venueEventsSeen: integer('venue_events_seen').default(0),
     venueEventsPastSkipped: integer('venue_events_past_skipped').default(0),
+    // Поиск отдал больше MAX_RESULTS_PER_QUERY результатов. Разбито по
+    // источникам: у «афиши» площадки из хвоста доходят через venue_queue, а у
+    // ticketpro/bezkassira добора нет — там хвост реально теряется.
     resultsTruncated: integer('results_truncated').default(0),
+    resultsTruncatedAfisha: integer('results_truncated_afisha').default(0),
+    resultsTruncatedTicketpro: integer('results_truncated_ticketpro').default(0),
+    resultsTruncatedBezkassira: integer('results_truncated_bezkassira').default(0),
     // Кэш поиска: попадания (сэкономленные запросы к сайтам), промахи и
     // «присоединения» к уже идущему запросу (см. lib/search-cache.js).
     searchCacheHits: integer('search_cache_hits').default(0),
