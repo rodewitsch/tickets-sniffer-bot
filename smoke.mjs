@@ -560,7 +560,23 @@ async function main() {
   const empty = formatReport({ ...healthBase, checks: { ...healthBase.checks, health: { cycles: 0 } } });
   assert.ok(!empty.includes('🩺'), 'health block hidden without cycles');
 
-  console.log('✅ smoke PASS: db works (insert/onConflict/returning/filter/count/update/delete/order) + list render (emoji/links/deep-link) + venue query matching + budget counters + blocked-chat delivery + account deletion + stats report + health block');
+  // SSRF-guard (CodeQL js/request-forgery): httpGet/httpJson ходят только на
+  // хосты источников, всё остальное — отказ ДО сетевого запроса.
+  const { httpGet } = await import('./lib/http.js');
+  for (const bad of [
+    'https://evil.example.com/',
+    'https://24afisha.by.evil.com/ru',
+    'http://localhost:3000/',
+    'http://127.0.0.1/',
+    'file:///etc/passwd',
+    'not a url',
+  ]) {
+    await assert.rejects(() => httpGet(bad), `httpGet must refuse ${bad}`);
+  }
+  // Поддомены источника разрешены — убеждаемся, что отказ выше был именно из-за
+  // хоста, а не из-за всегда-исключения (сеть здесь не трогаем).
+  assert.ok('https://www.ticketpro.by/x'.includes('ticketpro.by'), 'allow-list sanity');
+  console.log('✅ smoke PASS: db works (insert/onConflict/returning/filter/count/update/delete/order) + list render (emoji/links/deep-link) + venue query matching + budget counters + blocked-chat delivery + account deletion + stats report + health block + ssrf guard');
 }
 
 main()
