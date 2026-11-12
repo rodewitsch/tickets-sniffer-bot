@@ -133,6 +133,21 @@ Compose (`bot`, `cron`, `web`/Caddy).
 - `SERVE_STATIC` is off in Docker; `miniapp/` is published to GitHub Pages.
 - **`CHECK_SECRET` обязателен**: при пустом значении `GET /check` отвечает 503
   (`check_disabled`), а не открывает полный цикл проверки всем желающим.
+- **`GET /health` — не только «процесс жив», но и «опрос идёт»**.
+  `lib/watchdog.js` `healthStatus()` читает `meta.lastCheckAt`: `status: ok|stale|none`,
+  `ageMinutes`, `staleAfterMin` (env `STALE_CHECK_MIN`, дефолт 90 мин — самая
+  длинная пауза 60 мин плюс запас). Порог — только «старый `lastCheckAt`», а НЕ
+  «нет нового цикла»: пока цикл идёт (бывало 280 с), следующий таймер ещё не
+  сработал, и красный статус был бы ложным. `none` (циклов ещё не было) — `ok:true`,
+  иначе Docker healthcheck уронил бы приложение на пустой базе.
+  `stale` → HTTP **503**, это и есть внешний алерт: Docker healthcheck и любой
+  монитор (UptimeRobot и т.п.) увидят не только падение `bot`, но и смерть `cron`.
+- **Внутренний сторож (`lib/watchdog.js`, вызывается из `cron.js` после каждой
+  попытки цикла)**. Шлёт в `STATS_CHAT_ID` «🚨 Опрос билетов не работает», если
+  `runCheck` бросил исключение или `lastCheckAt` старше `STALE_CHECK_MIN`.
+  Дедуп: та же причина — не чаще раза в час (`meta.watchdogState`), выздоровление
+  снимает метку, чтобы следующая поломка сообщилась сразу. Контракт: ни один сбой
+  сторожа не бросает исключение в cron и не ломает цикл.
 - **Commits**: always in **English** and following **Conventional Commits**
   (`feat:`, `fix:`, `refactor:`, `chore:`, `docs:`, `test:`, `ci:`, etc.), e.g.
   `fix: refresh mini app watch list after delete`. Never write commit messages in

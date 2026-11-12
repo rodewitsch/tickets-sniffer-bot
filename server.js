@@ -10,13 +10,14 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PORT, CHECK_SECRET } from './env.js';
+import { PORT, CHECK_SECRET, STALE_CHECK_MIN } from './env.js';
 import { runCheck } from './lib/checker.js';
 import { runMigrations } from './migrate.js';
 import { fetchEventCities, AFISHA_HOSTS } from './lib/sources/afisha.js';
 import { searchTicketpro, searchTicketproVenues, enrichTicketproCategories } from './lib/sources/ticketpro.js';
 import { searchBezkassira, fetchBezkassiraOrganizer, enrichBezkassiraDetails } from './lib/sources/bezkassira.js';
 import { cityLabel } from './lib/cities.js';
+import { healthStatus } from './lib/watchdog.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MINIAPP_DIR = path.join(__dirname, 'miniapp');
@@ -401,7 +402,19 @@ const server = http.createServer(async (req, res) => {
       }
     }
     if (url.pathname === '/health' && req.method === 'GET') {
-      return sendJson(res, 200, { ok: true });
+      // Не только «процесс жив»: опрос может стоять, пока вебхук отвечает.
+      // Возраст последнего цикла берём из базы (meta.lastCheckAt), то есть видна
+      // и ситуация «cron-контейнер умер целиком» — это не видно изнутри cron.
+      // Пока циклов не было вовсе (свежая установка) — ok:true, иначе Docker
+      // healthcheck уронил бы приложение на пустой базе.
+      const cycle = await healthStatus({ staleMin: STALE_CHECK_MIN });
+      return sendJson(res, cycle.ok ? 200 : 503, {
+        ok: cycle.ok,
+        status: cycle.status,
+        lastCheckAt: cycle.lastCheckAt,
+        ageMinutes: cycle.ageMinutes,
+        staleAfterMin: cycle.staleAfterMin,
+      });
     }
     if (process.env.SERVE_STATIC === '1' && req.method === 'GET') {
       const served = await serveStatic(res, url.pathname);

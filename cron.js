@@ -10,6 +10,8 @@ import { runCheck } from './lib/checker.js';
 import { sendDailyStats, msUntilNextMinsk, minskParts } from './lib/stats.js';
 import { STATS_SEND_HOUR, STATS_SEND_MINUTE } from './lib/config.js';
 import { runMigrations } from './migrate.js';
+import { STALE_CHECK_MIN } from './env.js';
+import { watchdogTick } from './lib/watchdog.js';
 
 // Миграции при старте. Раньше их применял только server.js, а cron запускается
 // отдельным контейнером и писал в check_log раньше, чем bot успевал обновить
@@ -56,13 +58,20 @@ function nextDelayMinutes() {
 
 async function tick() {
   const started = Date.now();
+  // Ошибка цикла для сторожа — объявлена здесь, т.к. нужна после catch.
+  let lastError = null;
   try {
     const res = await runCheck({ force: process.env.CHECK_FORCE === '1' });
     console.log(`[cron] ${new Date().toISOString()} check:`, JSON.stringify(res), `in ${Date.now() - started}ms`);
   } catch (err) {
-    console.error(`[cron] ${new Date().toISOString()} check failed:`, err && err.message || err);
+    lastError = (err && (err.message || String(err))) || 'unknown error';
+    console.error(`[cron] ${new Date().toISOString()} check failed:`, lastError);
   }
-  scheduleNext();
+  const delayMin = scheduleNext();
+  // Сторож: сообщает владельцу, что опрос не работает. Вызывается ПОСЛЕ
+  // планирования следующего цикла, чтобы задержка Telegram-запроса не сдвигала
+  // график. Сбои сторожа глотает он сам (см. lib/watchdog.js).
+  await watchdogTick({ lastError, staleMin: STALE_CHECK_MIN, delayMin });
 }
 
 function scheduleNext() {
@@ -70,6 +79,7 @@ function scheduleNext() {
   const ms = minutes * 60 * 1000;
   console.log(`[cron] next check in ${minutes} min (${label}) at ${new Date(Date.now() + ms).toISOString()}`);
   setTimeout(tick, ms);
+  return minutes;
 }
 
 console.log('[cron] starting (peak 3-6 min, day 5-10 min, night 30-60 min)');

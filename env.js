@@ -24,3 +24,10 @@ export const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || '';
 // Базовый адрес API. DeepSeek совместим с OpenAI, поэтому при необходимости можно
 // подставить другой совместимый хост (например, локальный прокси).
 export const DEEPSEEK_API_BASE = process.env.DEEPSEEK_API_BASE || 'https://api.deepseek.com';
+
+// Порог «опрос встал» для GET /health и сторожа в cron, в минутах.
+// Самая длинная пауза по расписанию — 60 мин (ночью), плюс запас на долгий
+// цикл: 90 означает «за последние полтора часа не было ни одного цикла».
+// Умышленно НЕ «просто старые данные»: пока цикл идёт, таймер следующего ещё
+// не сработал, и ложный красный статус был бы хуже отсутствия метрики.
+export const STALE_CHECK_MIN = Number(process.env.STALE_CHECK_MIN || 90);

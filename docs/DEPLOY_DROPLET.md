@@ -121,7 +121,7 @@ Git на сервере не нужен — сервер остаётся чис
 
 ```bash
 docker compose ps
-curl https://<домен>/health                 # {"ok":true}
+curl https://<домен>/health                 # {"ok":true,"status":"ok",…}
 docker compose logs -f cron                 # циклы проверки каждые 15 мин
 docker compose exec bot sh -c 'ls -la /data'
 ```
