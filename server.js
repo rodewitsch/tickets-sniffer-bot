@@ -19,6 +19,9 @@ import { searchBezkassira, fetchBezkassiraOrganizer, enrichBezkassiraDetails } f
 import { cityLabel } from './lib/cities.js';
 import { healthStatus } from './lib/watchdog.js';
 
+// Хосты, к которым этим эндпоинтам разрешено обращаться (см. canonicalUrl).
+const BEZKASSIRA_HOSTS = ['bezkassira.by'];
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MINIAPP_DIR = path.join(__dirname, 'miniapp');
 
@@ -146,22 +149,47 @@ function corsHeaders(req) {
   };
 }
 
+// Адрес, который уйдёт в сетевой слой, собирается ТОЛЬКО здесь и ТОЛЬКО из
+// проверенных частей.
+//
+// Зачем: `/api/event-cities?url=…` — публичный эндпоинт с CORS, а его значение
+// целиком пришло от клиента. CodeQL (js/request-forgery) тянет taint от
+// `url.searchParams` до `fetch` в lib/http.js, и никакой allow-list по хостy
+// этот переход не снимает: остаётся «то же значение, что пришло снаружи».
+// Поэтому из клиентской строки берём ТОЛЬКО путь/запрос/фрагмент (уже
+// нормализованные `URL`), а протокол и хост — из заранее известного списка
+// хостов сервиса. Границы:
+//   * хост — строго из `hosts` (совпадение или поддомен);
+//   * путь — только `pathname`, который `URL` уже закодировал;
+//   * query и hash — как есть, пересобранные обратно через `URLSearchParams`.
+// Любой другой вход — исключение, а не «просто запрос».
+function canonicalUrl(rawUrl, hosts) {
+  const parsed = new URL(rawUrl);
+  const host = parsed.hostname.toLowerCase();
+  const approved = hosts.find((h) => host === h || host.endsWith('.' + h));
+  if (!approved) throw new Error(`host not allowed: ${host}`);
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    throw new Error(`unsupported protocol ${parsed.protocol}`);
+  }
+  const out = new URL(`https://${approved}`);
+  out.pathname = parsed.pathname;
+  out.search = parsed.search;
+  return out.toString();
+}
+
 async function handleEventCities(req, res, url) {
   if (!allowSearchRequest(req)) return sendRateLimited(req, res);
   const target = url.searchParams.get('url') || '';
-  let parsed;
+  let approved;
   try {
-    parsed = new URL(target);
-  } catch {
-    return sendHeaders(res, corsHeaders(req), 400, { ok: false, error: 'bad_url' });
-  }
-  // Whitelist хостов: только 24afisha.by и bycard.by.
-  const host = parsed.hostname.toLowerCase();
-  if (!AFISHA_HOSTS.some((h) => host === h || host.endsWith('.' + h))) {
-    return sendHeaders(res, corsHeaders(req), 400, { ok: false, error: 'host_not_allowed' });
+    // Хост проверяется в canonicalUrl, здесь только отдаём список разрешённых.
+    approved = canonicalUrl(target, AFISHA_HOSTS);
+  } catch (err) {
+    const bad = /^host not allowed/.test(String(err && err.message));
+    return sendHeaders(res, corsHeaders(req), 400, { ok: false, error: bad ? 'host_not_allowed' : 'bad_url' });
   }
   try {
-    const data = await fetchEventCities(parsed.toString());
+    const data = await fetchEventCities(approved);
     if (!data) {
       return sendHeaders(res, corsHeaders(req), 404, { ok: false, error: 'not_found' });
     }
@@ -246,18 +274,16 @@ async function handleBezkassiraSearch(req, res, url) {
 async function handleBezkassiraOrganizer(req, res, url) {
   if (!allowSearchRequest(req)) return sendRateLimited(req, res);
   const target = url.searchParams.get('url') || '';
-  let parsed;
+  let approved;
   try {
-    parsed = new URL(target);
-  } catch {
-    return sendHeaders(res, corsHeaders(req), 400, { ok: false, error: 'bad_url' });
-  }
-  const host = parsed.hostname.toLowerCase();
-  if (host !== 'bezkassira.by' && !host.endsWith('.bezkassira.by')) {
-    return sendHeaders(res, corsHeaders(req), 400, { ok: false, error: 'host_not_allowed' });
+    // Единственный хост этого эндпоинта — bezkassira.by (с поддоменами).
+    approved = canonicalUrl(target, BEZKASSIRA_HOSTS);
+  } catch (err) {
+    const bad = /^host not allowed/.test(String(err && err.message));
+    return sendHeaders(res, corsHeaders(req), 400, { ok: false, error: bad ? 'host_not_allowed' : 'bad_url' });
   }
   try {
-    const organizer = await fetchBezkassiraOrganizer(parsed.toString());
+    const organizer = await fetchBezkassiraOrganizer(approved);
     if (!organizer) return sendHeaders(res, corsHeaders(req), 404, { ok: false, error: 'not_found' });
     sendHeaders(res, corsHeaders(req), 200, { ok: true, organizer });
   } catch (err) {
