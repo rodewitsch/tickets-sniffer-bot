@@ -368,7 +368,10 @@ async function main() {
   assert.ok(disableConfirmText(3).includes('3 позиции'), 'confirm names the item count');
   assert.ok(disableConfirmText(5).includes('5 позиций'), 'confirm handles plural');
   assert.ok(disabledText(del).includes('удалены'), 'result confirms deletion');
-  assert.ok(JSON.stringify(mainReplyKeyboard('https://x', false)).includes(DISABLE_BUTTON), 'disable button present in reply keyboard');
+  // «Отключить бота» — не в reply-клавиатуре, а в разделе «Помощь».
+  const { helpKeyboard } = await import('./lib/menus.js');
+  assert.ok(!JSON.stringify(mainReplyKeyboard('https://x', false)).includes(DISABLE_BUTTON), 'disable button absent from reply keyboard');
+  assert.ok(JSON.stringify(helpKeyboard()).includes('account:disable'), 'disable action present in help keyboard');
 
   // «🔕 Больше не уведомлять» глушит ОДНО событие, а не всю подписку.
   //
