@@ -13,12 +13,22 @@ import { handleWebAppData } from '../lib/webapp.js';
 import { sendStatsReport } from '../lib/stats.js';
 import { sendFreshReplyKeyboard } from '../lib/reply.js';
 import { STATS_CHAT_ID } from '../lib/config.js';
-import { feedbackSession, clearFeedback } from '../lib/feedback.js';
+import {
+  feedbackSession, clearFeedback,
+  saveFeedback, setFeedbackOwnerMessage, feedbackReplyKeyboard,
+} from '../lib/feedback.js';
+import handleOwnerReply from '../lib/feedback-bridge.js';
 import { escapeHtml } from '../lib/util.js';
 
 export default async function (message) {
   const chat = message.chat;
   const chatId = chat.id;
+
+  // Владелец отвечает на обращение (кнопка «✏️ Ответить» под карточкой).
+  // Проверка стоит ПЕРВОЙ: /stats и прочие команды в режиме ответа не должны
+  // уйти в обычную ветку, а медиа-ответы иначе вообще некуда было бы деть.
+  // Для всех остальных чатов функция сразу возвращает false.
+  if (await handleOwnerReply(message)) return;
 
   // Регистрация и отметка активности — ДО ветвления на Mini App.
   //
@@ -157,19 +167,26 @@ export default async function (message) {
 
   // Режим «написать владельцу» из Помощи: следующее текстовое сообщение — это
   // обращение (ошибка/пожелание), а не ключевое слово для отслеживания.
-  // Пересылаем его владельцу (STATS_CHAT_ID) с данными отправителя.
+  //
+  // Обращение СНАЧАЛА сохраняется в `feedback`: без id в базе ответить было
+  // бы не на что (раньше владелец мог только написать человеку лично).
+  // Карточка уходит в STATS_CHAT_ID с кнопкой «✏️ Ответить» (fb:reply:<id>).
   if (feedbackSession(chatId)) {
     clearFeedback(chatId);
     const from = message.from || {};
     const name = from.first_name || message.chat?.title || '?';
-    const userTag = from.username ? `@${from.username}` : '';
-    const header = `✍️ <b>Обращение</b>\nОт: ${escapeHtml(name)} ${userTag ? escapeHtml(userTag) : ''} (id=${chatId})\n\n`;
+    const username = from.username || null;
+    const userTag = username ? `@${username}` : '';
     try {
-      await api.sendMessage({
+      const row = await saveFeedback({ chatId, authorName: name, authorUsername: username, text });
+      const header = `✍️ <b>Обращение #${row.id}</b>\nОт: ${escapeHtml(name)} ${userTag ? escapeHtml(userTag) : ''} (id=${chatId})\n\n`;
+      const sent = await api.sendMessage({
         chat_id: STATS_CHAT_ID,
         text: header + escapeHtml(text.slice(0, 3000)),
         parse_mode: 'HTML',
+        reply_markup: feedbackReplyKeyboard(row.id),
       });
+      if (sent && sent.message_id) await setFeedbackOwnerMessage(row.id, sent.message_id);
       await sendFreshReplyKeyboard(chatId, '✅ Спасибо! Я передал ваше сообщение разработчику.');
     } catch (e) {
       console.error('feedback forward failed:', e && e.message || e);

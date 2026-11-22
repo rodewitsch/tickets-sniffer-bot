@@ -144,6 +144,37 @@ export const mutedEvents = sqliteTable(
   ],
 );
 
+// Обращения владельцу («✍️ Сообщить об ошибке / пожелание»).
+// Раньше текст обращения просто уходил в STATS_CHAT_ID, и ответить на него
+// было некому: под карточкой не было кнопки, а пересылка не хранилась.
+// Теперь каждое обращение — строка с id, и владелец отвечает КНОПКОЙ
+// «Ответить» прямо под обращением (см. lib/feedback.js).
+//   chatId    — кто написал (получатель ответа);
+//   ownerMsgId/messageId — какие сообщения в чате владельца: карточка обращения
+//               и открытая форма ответа. Нужны, чтобы разметку диалога
+//               держать в meta (после перезапуска и в cron-процессе).
+//   replyText — что владелец ответил (для «уже отвечено» и повторной отправки);
+//   status    — open | answered.
+export const feedback = sqliteTable(
+  'feedback',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    chatId: integer('chat_id').notNull(),
+    authorName: text('author_name'),
+    authorUsername: text('author_username'),
+    text: text('text').notNull(),
+    createdAt: integer('created_at').default(sql`(unixepoch())`),
+    ownerMsgId: integer('owner_msg_id'),
+    messageId: integer('message_id'),
+    replyText: text('reply_text'),
+    answeredAt: integer('answered_at'),
+    status: text('status').notNull().default('open'),
+  },
+  (t) => [
+    index('idx_feedback_status').on(t.status, t.createdAt),
+  ],
+);
+
 // Журнал циклов проверки (для ежедневной статистики): одна строка на выполненный
 // цикл. checked/notified/failed — счётчики позиций, уведомлений и ошибок цикла.
 // Поля budget_* — утилизация бюджетов опроса за цикл (см. lib/budget.js):

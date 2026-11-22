@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## Unreleased
+
+### Features
+
+* reply to user feedback right from the chat: reports are stored in the
+  `feedback` table, arrive with a “✏️ Ответить” button, and the owner's reply
+  (text, photo or document) is delivered to the author by the bot
+
 ## 0.2.0 (2026-09-02)
 
 

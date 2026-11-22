@@ -478,6 +478,28 @@ async function main() {
   await muteEvent({ chatId: muteChat, dedupeKey: keyA, title: 'X' });
   const delMuted = await deleteAllUserData(muteChat);
   assert.equal(delMuted.mutedEvents, 1, 'account deletion removes muted events');
+
+  // Обращение владельцу: строка в `feedback` + ответ на неё.
+  // Без записи ответить было не на что — это и был запрос пользователя
+  // («хочу отвечать прямо в чате»).
+  const { saveFeedback, getFeedback, countOpenFeedback, markFeedbackAnswered } = await import('./lib/feedback.js');
+  const fbChat = 900006;
+  await deleteAllUserData(fbChat);
+  await db.insert(users).values({ chatId: fbChat }).run();
+  const fbRow = await saveFeedback({ chatId: fbChat, authorName: 'Тест', authorUsername: 'test', text: 'не приходит уведомление' });
+  assert.ok(fbRow.id > 0, 'feedback row has an id for the reply button');
+  assert.equal(fbRow.status, 'open', 'new feedback is open');
+  assert.equal((await getFeedback(fbRow.id)).text, 'не приходит уведомление', 'feedback text persisted');
+  const openBefore = await countOpenFeedback();
+  assert.ok(openBefore >= 1, 'open feedback is counted');
+  await markFeedbackAnswered(fbRow.id, { replyText: 'проверьте /list' });
+  const fbAfter = await getFeedback(fbRow.id);
+  assert.equal(fbAfter.status, 'answered', 'reply marks feedback as answered');
+  assert.equal(fbAfter.replyText, 'проверьте /list', 'reply text stored');
+  assert.ok(fbAfter.answeredAt, 'reply time stored');
+  // «Отключить бота» — это удаление всех данных, переписка тоже уходит.
+  const delFb = await deleteAllUserData(fbChat);
+  assert.equal(delFb.feedback, 1, 'account deletion removes feedback');
   assert.ok(renderMutedEvents([]).includes('сама подписка продолжает работать'), 'empty muted list explains the mechanism');
 
   // Отчёт: разбивка «в продаже» — по источникам, а не все события кэша; обход
