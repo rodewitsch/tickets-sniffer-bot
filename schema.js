@@ -235,6 +235,10 @@ export const checkLog = sqliteTable(
     searchCacheHits: integer('search_cache_hits').default(0),
     searchCacheMisses: integer('search_cache_misses').default(0),
     searchCacheJoins: integer('search_cache_joins').default(0),
+    // Ротация окна выдачи поиска (см. rotationWindow в lib/search-cache.js):
+    // сколько раз окно сдвинулось и сколько запросов за цикл прошло выдачу целиком.
+    searchWindowRotated: integer('search_window_rotated').default(0),
+    searchWindowFull: integer('search_window_full').default(0),
     // События, не перечитывавшиеся, т.к. не в продаже и стартуют позже горизонта
     // предпродажи (см. RECHECK_PRESALE_HORIZON_DAYS).
     presaleSkipped: integer('presale_skipped').default(0),
