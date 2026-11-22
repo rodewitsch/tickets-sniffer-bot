@@ -6,6 +6,10 @@ All notable changes to this project will be documented in this file. See [standa
 
 ### Features
 
+* show every date with tickets on sale in the notification card
+  (“🗓 Билеты есть и на: 23.11 · 24.11”) — the afisha schedule is now requested
+  with `time` + `ignoreEndTime=1`, which returns the upcoming days instead of
+  today only; sold-out sessions (tag «Продано») are skipped
 * reply to user feedback right from the chat: reports are stored in the
   `feedback` table, arrive with a “✏️ Ответить” button, and the owner's reply
   (text, photo or document) is delivered to the author by the bot

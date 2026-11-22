@@ -51,6 +51,17 @@ Compose (`bot`, `cron`, `web`/Caddy).
   `GET api.24afisha.by/api/v2/schedule/events/<числовой-id события>?cityId=<N>` →
   `data[0].objects[].sessions[].isSaleOpen`. Список городов: `GET /api/v2/cities` (slug→id).
   Кино размечено JSON-LD как `Movie` (без offers/location) — JSON-LD там бесполезен.
+  **Без `&time=<unix начала сегодняшнего дня>&ignoreEndTime=1` API отдаёт ТОЛЬКО
+  сегодняшние сеансы** — так расписание грузит сам сайт (`/_nuxt/…js`, `loadSh`). С
+  ними приходят все сеансы от указанного времени (обычно 2–3 дня вперёд) — это
+  единственный способ показать в карточке несколько дат.
+- **Сколько билетов осталось — сайты НЕ отдают.** Проверено: у сеанса афиши есть
+  только `dateStr/timeStr/minPrice/maxPrice/isSaleOpen/isBooking/tags` (в тегах лишь
+  `2D` и `Продано` = id 51), карта зала — закрытый AJAX (`Invalid owner! Access denied`),
+  у ticketpro `/api/events/<id>/tickets|seats` → 404, у BezKassira `plan.freeHall = 0`.
+  Поэтому в карточке показываем ДАТЫ, на которые билеты уже есть (`extraDates`,
+  строка «🗓 Билеты есть и на: 23.11 · 24.11»), а не количество. Не обещай пользователям
+  количество мест.
 - **Площадки (afisha)**: старые страницы площадок `/ru/<city>/events/<slug>` «битые»
   (title «Билеты в undefined», событий нет) — не скрапить. Рабочая публичная страница —
   `/ru/object/<slug>`; её данные: `GET /api/v3/pages/objects/<slug>?cityId=0&lang=ru&slug=true&jsonld=0`
