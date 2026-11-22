@@ -1,18 +1,17 @@
 import { api } from '../api.js';
-import { HELP, helpKeyboard, renderWatchlist, mainMenuKeyboard, mainReplyKeyboard, NO_LINK_PREVIEW, disableConfirmText, disableConfirmKeyboard, disabledText, renderMutedEvents, mutedEventsKeyboard, notificationKey, CALLBACK_DATA_TRUNCATED } from '../lib/menus.js';
+import { HELP, helpKeyboard, renderWatchlist, mainMenuKeyboard, mainReplyKeyboard, NO_LINK_PREVIEW, disableConfirmText, disableConfirmKeyboard, disabledText, renderMutedEvents, mutedEventsKeyboard, notificationKey, dayFromDateText, CALLBACK_DATA_TRUNCATED } from '../lib/menus.js';
 import { listWatchItems, removeWatchItem, deactivateWatchItem, getWatchItem, miniAppUrl, miniAppConfigured, SOURCE_LABEL, deleteAllUserData, muteEvent, listMutedEvents, unmuteEvent, unmuteAllEvents } from '../lib/watch.js';
 import { addWatchItem } from '../lib/watch.js';
 import { sendFreshReplyKeyboard } from '../lib/reply.js';
-import { startFeedback, clearFeedback } from '../lib/feedback.js';
+import {
+  startFeedback, clearFeedback,
+  FEEDBACK_PROMPT_TEXT, FEEDBACK_PROMPT_KEYBOARD,
+  FEEDBACK_REPLY_PROMPT, FEEDBACK_REPLY_CANCEL_KEYBOARD,
+  FEEDBACK_ANSWERED_PROMPT,
+  getFeedback, startReply, clearReply,
+} from '../lib/feedback.js';
+import { STATS_CHAT_ID } from '../lib/config.js';
 import { escapeHtml, stripTags } from '../lib/util.js';
-
-// Промпт режима ввода обращения + кнопка «Отмена» (инлайн на том же сообщении).
-const FEEDBACK_PROMPT_TEXT =
-  '✍️ <b>Напишите сообщение здесь</b> — я передам его разработчику.\n\n' +
-  'Опишите, что случилось (ошибка) или что хотите предложить, и отправьте одним текстовым сообщением.';
-function feedbackPromptKeyboard() {
-  return { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'feedback:cancel' }]] };
-}
 
 // Название события из карточки уведомления — только для показа в списке
 // заглушённого («что я выключил»). Заголовок карточки идёт третьей строкой
@@ -74,14 +73,13 @@ function dedupeKeyFromCard(cardText) {
   const title = decodeOnce(stripTags(titleLine)).replace(/\s+/g, ' ').trim();
   if (!title) return null;
   const dateLine = lines.find((l) => l.startsWith('📅')) || '';
-  const m = /(\d{2})\.(\d{2})\.(\d{4})(?:\s+(\d{2}):(\d{2}))?/.exec(dateLine);
-  if (!m) return null;
-  const [, dd, mo, yy, hh = '00', mi = '00'] = m;
-  // Беларусь = UTC+3, сутки считаются по UTC — та же арифметика, что в
-  // notificationKey (Math.floor(startsAt / 86400)). Карточка показывает
-  // локальное время, поэтому переводим обратно в UTC.
-  const utcMs = Date.UTC(Number(yy), Number(mo) - 1, Number(dd), Number(hh), Number(mi)) - 3 * 3600 * 1000;
-  return notificationKey({ title, startsAt: Math.floor(utcMs / 1000) });
+  // День — ОДНОЙ функцией из lib/menus.js (та же, что в notificationKey): раньше
+  // арифметика UTC+3 была скопирована здесь, и копии расходились — заглушка
+  // ставилась на другой день, чем проверялась, и событие приходило снова.
+  const day = dayFromDateText(dateLine);
+  if (day == null) return null;
+  // startsAt задаём в середине этого дня: notificationKey возьмёт ровно `day`.
+  return notificationKey({ title, startsAt: day * 86400 + 43200 });
 }
 
 function titleFromNotification(cb) {
@@ -91,6 +89,14 @@ function titleFromNotification(cb) {
   const candidate = lines[1] || '';
   const clean = decodeOnce(stripTags(candidate)).replace(/\s+/g, ' ').trim();
   return clean ? clean.slice(0, 200) : null;
+}
+
+// Дата из карточки — для списка заглушённого («🔕 Заглушённые события»).
+// Только для показа; ключ заглушки считается из неё же (dedupeKeyFromCard).
+function dateFromNotification(cb) {
+  const caption = cb.message?.caption || cb.message?.text || '';
+  const line = caption.split('\n').map((l) => l.trim()).find((l) => l.startsWith('📅'));
+  return line ? decodeOnce(stripTags(line)).replace(/^📅\s*/, '').trim() || null : null;
 }
 
 export default async function (cb) {
@@ -134,7 +140,7 @@ export default async function (cb) {
     // отправит владельцу (см. handlers/message.js), а не предложит как ключевое слово.
     startFeedback(chatId);
     const text = FEEDBACK_PROMPT_TEXT;
-    const kb = feedbackPromptKeyboard();
+    const kb = FEEDBACK_PROMPT_KEYBOARD;
     if (isEditable) {
       await api.editMessageText({ chat_id: chatId, message_id: msgId, text, parse_mode: 'HTML', reply_markup: kb });
     } else {
@@ -149,6 +155,55 @@ export default async function (cb) {
       await api.editMessageText({ chat_id: chatId, message_id: msgId, text: 'Отменено 🙂', parse_mode: 'HTML', reply_markup: { inline_keyboard: [] } });
     } else {
       await api.sendMessage({ chat_id: chatId, text: 'Отменено 🙂 Если понадобится помощь — напишите /help.' });
+    }
+    return;
+  }
+
+  // ── Владелец отвечает на обращение (кнопка под карточкой в STATS_CHAT_ID) ──
+  //
+  // Отвечать может только владелец: в чужом чате кнопки нет, а подделанный
+  // callback_data не должен позволить писать от имени бота произвольному лицу.
+  if (data.startsWith('fb:reply:')) {
+    if (chatId !== STATS_CHAT_ID) return;
+    if (!STATS_CHAT_ID) return;
+    const id = Number(data.slice('fb:reply:'.length));
+    const row = await getFeedback(id);
+    if (!row) {
+      if (isEditable) {
+        await api.editMessageText({ chat_id: chatId, message_id: msgId, text: '⚠️ Обращение не найдено.', reply_markup: { inline_keyboard: [] } });
+      }
+      return;
+    }
+    // Режим ответа живёт в meta, а не только в памяти модуля: нажать «Ответить»
+    // можно и после перезапуска бота (см. lib/feedback.js).
+    await startReply(row.id, { messageId: null });
+    const already = row.status === 'answered' ? `\n\n${FEEDBACK_ANSWERED_PROMPT}` : '';
+    const promptText = FEEDBACK_REPLY_PROMPT
+      + `\n\n<b>Кому:</b> ${escapeHtml(row.authorName || 'без имени')}`
+      + (row.authorUsername ? ` @${escapeHtml(row.authorUsername)}` : '')
+      + ` (id=${row.chatId})`
+      + already;
+    if (isEditable) {
+      await api.editMessageReplyMarkup({ chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [] } });
+    }
+    // Отдельное сообщение, чтобы исходная карточка обращения осталась в ленте
+    // с номером и текстом, а форма ответа была ниже неё.
+    await api.sendMessage({
+      chat_id: chatId,
+      text: promptText,
+      parse_mode: 'HTML',
+      reply_markup: FEEDBACK_REPLY_CANCEL_KEYBOARD,
+    });
+    return;
+  }
+
+  if (data === 'fb:cancel') {
+    if (chatId !== STATS_CHAT_ID) return;
+    await clearReply();
+    if (isEditable) {
+      await api.editMessageText({ chat_id: chatId, message_id: msgId, text: 'Отменено 🙂 Ответ не отправлен.', reply_markup: { inline_keyboard: [] } });
+    } else {
+      await api.sendMessage({ chat_id: chatId, text: 'Отменено 🙂 Ответ не отправлен.' });
     }
     return;
   }
@@ -316,7 +371,7 @@ export default async function (cb) {
       // chatId самого нажатия, он и так наш.
       const owner = item ? item.chatId : chatId;
       if (owner !== chatId) return;
-      await muteEvent({ chatId, dedupeKey, title: titleFromNotification(cb), dateText: null });
+      await muteEvent({ chatId, dedupeKey, title: titleFromNotification(cb), dateText: dateFromNotification(cb) });
       try {
         await api.editMessageReplyMarkup({ chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [] } });
       } catch { /* сообщение могло измениться */ }
