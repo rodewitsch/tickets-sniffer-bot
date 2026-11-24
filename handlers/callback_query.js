@@ -413,9 +413,9 @@ export default async function (cb) {
     await unmuteAllEvents(chatId);
     const text = '🔔 Готово: снова буду присылать уведомления про все ранее заглушённые события.';
     if (isEditable) {
-      await api.editMessageText({ chat_id: chatId, message_id: msgId, text, parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '📋 Мой список', callback_data: 'wl:list' }]] } });
+      await api.editMessageText({ chat_id: chatId, message_id: msgId, text, parse_mode: 'HTML', reply_markup: mutedEventsKeyboard([]) });
     } else {
-      await api.sendMessage({ chat_id: chatId, text, parse_mode: 'HTML' });
+      await api.sendMessage({ chat_id: chatId, text, parse_mode: 'HTML', reply_markup: mutedEventsKeyboard([]) });
     }
     return;
   }
@@ -431,7 +431,9 @@ export default async function (cb) {
     const text = target
       ? `🔔 Снова слежу: ${name}.${rows.length ? '' : '\n\nЗаглушённых событий больше нет.'}`
       : '🤔 Этого события нет в списке заглушённых — возможно, уже включено.';
-    const kb = rows.length ? mutedEventsKeyboard(rows) : { inline_keyboard: [[{ text: '📋 Мой список', callback_data: 'wl:list' }]] };
+    const kb = rows.length
+      ? mutedEventsKeyboard(rows)
+      : mutedEventsKeyboard([]);
     if (isEditable) {
       await api.editMessageText({ chat_id: chatId, message_id: msgId, text, parse_mode: 'HTML', reply_markup: kb });
     } else {
