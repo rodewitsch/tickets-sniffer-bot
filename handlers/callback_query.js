@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { HELP, helpKeyboard, renderWatchlist, mainMenuKeyboard, mainReplyKeyboard, NO_LINK_PREVIEW, disableConfirmText, disableConfirmKeyboard, disabledText, renderMutedEvents, mutedEventsKeyboard, notificationKey, dayFromDateText, CALLBACK_DATA_TRUNCATED } from '../lib/menus.js';
-import { listWatchItems, removeWatchItem, deactivateWatchItem, getWatchItem, miniAppUrl, miniAppConfigured, SOURCE_LABEL, deleteAllUserData, muteEvent, listMutedEvents, unmuteEvent, unmuteAllEvents } from '../lib/watch.js';
+import { listWatchItems, removeWatchItem, deactivateWatchItem, getWatchItem, miniAppUrl, miniAppConfigured, SOURCE_LABEL, deleteAllUserData, muteEventTitle, listMutedEvents, unmuteEvent, unmuteAllEvents } from '../lib/watch.js';
 import { addWatchItem } from '../lib/watch.js';
 import { sendFreshReplyKeyboard } from '../lib/reply.js';
 import {
@@ -371,13 +371,18 @@ export default async function (cb) {
       // chatId самого нажатия, он и так наш.
       const owner = item ? item.chatId : chatId;
       if (owner !== chatId) return;
-      await muteEvent({ chatId, dedupeKey, title: titleFromNotification(cb), dateText: dateFromNotification(cb) });
+      // Глушим СОБЫТИЕ ЦЕЛИКОМ (все его даты): человек жмёт «больше не уведомлять»
+      // про спектакль, а не про сеанс. Раньше ключ содержал день, и на каждую
+      // новую дату «Плетёного мужа» приходилось жать его заново — в базе владельца
+      // накопилось 24 записи, из которых 6 — один и тот же спектакль.
+      await muteEventTitle({ chatId, dedupeKey, title: titleFromNotification(cb), dateText: dateFromNotification(cb) });
       try {
         await api.editMessageReplyMarkup({ chat_id: chatId, message_id: msgId, reply_markup: { inline_keyboard: [] } });
       } catch { /* сообщение могло измениться */ }
       const text =
-        '🔕 Больше не буду присылать уведомления про это событие.\n' +
-        '<i>Ваши остальные подписки (в том числе по этому же слову) продолжают работать.</i>';
+        '🔕 Больше не буду присылать уведомления про это событие — на все его даты.\n' +
+        '<i>Ваши остальные подписки (в том числе по этому же слову) продолжают работать. ' +
+        'Вернуть событие: «Помощь» → «Заглушённые события».</i>';
       await api.sendMessage({ chat_id: chatId, text, parse_mode: 'HTML' });
       return;
     }
@@ -423,17 +428,14 @@ export default async function (cb) {
   if (data.startsWith('muted:un:')) {
     const id = Number(data.slice('muted:un:'.length));
     // Владельца проверяет сам unmuteEvent (условие по chatId), чужой id безопасен.
-    const before = await listMutedEvents(chatId);
-    const target = before.find((r) => Number(r.id) === id);
-    await unmuteEvent(chatId, id);
+    // Снимается всё событие целиком (вместе с легаси-строками по дням).
+    const name0 = await unmuteEvent(chatId, id);
     const rows = await listMutedEvents(chatId);
-    const name = target && target.title ? `«${escapeHtml(target.title)}»` : 'это событие';
-    const text = target
-      ? `🔔 Снова слежу: ${name}.${rows.length ? '' : '\n\nЗаглушённых событий больше нет.'}`
+    const name = name0 ? `«${escapeHtml(name0)}»` : 'это событие';
+    const text = name0
+      ? `🔔 Снова слежу: ${name} (на все даты).${rows.length ? '' : '\n\nЗаглушённых событий больше нет.'}`
       : '🤔 Этого события нет в списке заглушённых — возможно, уже включено.';
-    const kb = rows.length
-      ? mutedEventsKeyboard(rows)
-      : mutedEventsKeyboard([]);
+    const kb = mutedEventsKeyboard(rows);
     if (isEditable) {
       await api.editMessageText({ chat_id: chatId, message_id: msgId, text, parse_mode: 'HTML', reply_markup: kb });
     } else {
