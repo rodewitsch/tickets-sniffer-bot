@@ -10,9 +10,10 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PORT, CHECK_SECRET, STALE_CHECK_MIN } from './env.js';
+import { PORT, CHECK_SECRET, STALE_CHECK_MIN, WEBHOOK_SECRET } from './env.js';
 import { runCheck } from './lib/checker.js';
 import { runMigrations } from './migrate.js';
+import { webhookSecretMatches } from './lib/telegram-auth.js';
 import { fetchEventCities, AFISHA_HOSTS } from './lib/sources/afisha.js';
 import { searchTicketpro, searchTicketproVenues, enrichTicketproCategories } from './lib/sources/ticketpro.js';
 import { searchBezkassira, fetchBezkassiraOrganizer, enrichBezkassiraDetails } from './lib/sources/bezkassira.js';
@@ -74,6 +75,14 @@ function sendJson(res, status, obj) {
 }
 
 async function handleWebhook(req, res) {
+  // Подпись апдейта: без неё /webhook публичен — любой может прислать поддельный
+  // Update с чужим chat_id и менять чужие подписки. Проверяем ДО чтения тела.
+  // Секрет берём из заголовка (см. scripts/set-webhook.mjs → secret_token).
+  // Если WEBHOOK_SECRET не задан — проверка выключена (обратная совместимость
+  // при первом деплое; включите, задав env и перевыпустив webhook).
+  if (WEBHOOK_SECRET && !webhookSecretMatches(req.headers['x-telegram-bot-api-secret-token'], WEBHOOK_SECRET)) {
+    return sendJson(res, 403, { ok: false, error: 'forbidden' });
+  }
   // Ограничиваем тело: эндпоинт публичный, а апдейты Telegram всегда крошечные.
   // Без лимита один большой POST уронил бы контейнер по памяти.
   const MAX_BODY = 1024 * 1024; // 1 МБ
@@ -462,4 +471,12 @@ try {
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`[server] listening on 0.0.0.0:${PORT}`);
+  if (WEBHOOK_SECRET && !/^[A-Za-z0-9_-]{1,256}$/.test(WEBHOOK_SECRET)) {
+    // Невалидный секрет Telegram отклонит в setWebhook, а мы отвергнем ВСЕ апдейты.
+    console.error('[server] WEBHOOK_SECRET должен быть 1..256 символов A-Za-z0-9_-; вебхук не сработает.');
+  } else if (WEBHOOK_SECRET) {
+    // Напоминание: секрет в env, но вебхук должен быть перевыпущен с тем же
+    // secret_token, иначе Telegram не шлёт заголовок и бот молчит (403).
+    console.log('[server] проверка секрета вебхука включена (убедитесь, что вебхук перевыпущен с secret_token).');
+  }
 });

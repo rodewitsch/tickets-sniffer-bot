@@ -78,8 +78,24 @@ function dedupeKeyFromCard(cardText) {
   // ставилась на другой день, чем проверялась, и событие приходило снова.
   const day = dayFromDateText(dateLine);
   if (day == null) return null;
-  // startsAt задаём в середине этого дня: notificationKey возьмёт ровно `day`.
-  return notificationKey({ title, startsAt: day * 86400 + 43200 });
+  // Место («📍 площадка, город») — часть ключа: без него одноимённые события
+  // схлопнулись бы. Строку НЕ разбираем на части: notificationKey прогонит её
+  // через ту же normText, что и чекер (eventPlace → «площадка, город»), поэтому
+  // ключи совпадут байт-в-байт.
+  const placeLine = lines.find((l) => l.startsWith('📍')) || '';
+  const place = decodeOnce(stripTags(placeLine)).replace(/^📍\s*/, '').replace(/\s+/g, ' ').trim();
+  // dateText задаём серединой этого дня (UTC+3): notificationKey предпочтёт его
+  // и возьмёт ровно `day`.
+  return notificationKey({ title, dateText: dayTextFromDay(day), startsAt: day * 86400 + 43200, venue: place });
+}
+
+// «ДД.ММ.ГГГГ 12:00» (UTC+3) для номера дня: валидный dateText, из которого
+// dayFromDateText вернёт тот же день.
+function dayTextFromDay(day) {
+  const d = new Date((day * 86400 + 12 * 3600) * 1000);
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  return `${dd}.${mm}.${d.getUTCFullYear()} 12:00`;
 }
 
 function titleFromNotification(cb) {

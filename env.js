@@ -12,6 +12,12 @@ export const PORT = Number(process.env.PORT || 8080);
 // Секрет для проверки запросов на /check (защита крона).
 export const CHECK_SECRET = process.env.CHECK_SECRET || '';
 
+// Секрет вебхука Telegram (secret_token в setWebhook). Telegram присылает его в
+// заголовке X-Telegram-Bot-Api-Secret-Token, мы сверяем и отклоняем чужие POST.
+// Пустое значение = проверка выключена (обратная совместимость при первом
+// деплое); задайте и повторите `npm run set-webhook`, чтобы включить.
+export const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
+
 // Username бота без @ — нужен для ссылок-диплинков в сообщениях («🔕 отписаться»).
 // Значение должно совпадать с реальным username, иначе ссылка откроет чужого бота.
 export const BOT_USERNAME = process.env.BOT_USERNAME || 'tickets_sniffer_bot';

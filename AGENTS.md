@@ -22,7 +22,7 @@ Compose (`bot`, `cron`, `web`/Caddy).
 | `db.js` | SQLite layer: `drizzle(better-sqlite3)` handle + re-exported operators (`eq/and/desc/sql`). |
 | `drizzle/` | Generated migration SQL + journal (from `drizzle-kit generate`), applied at startup. |
 | `api.js` | Telegram Bot API: `api.<method>(params)` → unwrapped result, throws `BotApiError`. |
-| `env.js` | Config from `process.env`: `BOT_TOKEN`, `PORT`, `DB_PATH`, `CHECK_SECRET`, `API_HOST`. |
+| `env.js` | Config from `process.env`: `BOT_TOKEN`, `PORT`, `DB_PATH`, `CHECK_SECRET`, `WEBHOOK_SECRET`, `API_HOST`. |
 | `lib/` | Business logic: `checker`, `watch`, `menus`, `webapp`, `util`, `http`, `jsonld`, `normalize`, `stats`, `ai-report`, `delivery`, `sources/{afisha,ticketpro,bezkassira}`, `config`. |
 | `handlers/` | Webhook handlers, one per update type (`message`, `callback_query`). |
 | `server.js` | HTTP server: `POST /webhook`, `GET /check`, `GET /health`. Entrypoint. |
