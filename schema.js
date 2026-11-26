@@ -209,6 +209,9 @@ export const checkLog = sqliteTable(
     venueQueueDeferred: integer('venue_queue_deferred').default(0),
     // Площадку переименовали на сайте — slug обновлён вместо вечного backoff.
     venueQueueRenamed: integer('venue_queue_renamed').default(0),
+    // Событие площадки из очереди не отправлено: позиция следит за другим городом
+    // (раньше город получателя в обходе не проверялся вовсе).
+    venueCitySkipped: integer('venue_city_skipped').default(0),
     // Снимок: сколько РАЗНЫХ площадок битые прямо сейчас (не сумма за сутки).
     venueQueueFailingNow: integer('venue_queue_failing_now').default(0),
     // Сколько раз в поиске нашлось >= MAX_VENUE_RESULTS_PER_QUERY площадок.

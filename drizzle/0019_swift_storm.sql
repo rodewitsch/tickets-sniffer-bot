@@ -1,0 +1,1 @@
+ALTER TABLE `check_log` ADD `venue_city_skipped` integer DEFAULT 0;
