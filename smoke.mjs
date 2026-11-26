@@ -14,8 +14,8 @@ const tempDb = ownDb
 process.env.DB_PATH = tempDb;
 
 const { count } = await import('drizzle-orm');
-const { default: db, sqlite, eq, and, desc } = await import('./db.js');
-const { users, events, watchItems, checkLog, venueQueue, notifications } = await import('./schema.js');
+const { default: db, sqlite, eq, and, desc, sql } = await import('./db.js');
+const { users, events, watchItems, checkLog, venueQueue, notifications, mutedEvents } = await import('./schema.js');
 const { runMigrations } = await import('./migrate.js');
 const {
   renderWatchlist, itemEmoji, unsubDeepLink, unsubConfirmText, unsubConfirmKeyboard,
@@ -378,7 +378,19 @@ async function main() {
   // Это и был баг: под словом «театр» лежат десятки спектаклей, и нажатие под
   // одним выключало слово целиком. Проверяем именно то, из-за чего кнопка
   // переделывалась: позиция ОСТАЁТСЯ активной, глушится только её событие.
-  const { muteEvent, isEventMuted, listMutedEvents, unmuteEvent, unmuteAllEvents } = await import('./lib/watch.js');
+  // API переименовано при переходе на заглушку «событие целиком» (muteEvent →
+  // muteEventTitle, isEventMuted → сверка ключа в muted_events): тест долго
+  // ссылался на старые имена и падал ещё ДО проверок — держим в актуальном виде.
+  const { muteEventTitle, eventMuteKey, listMutedEvents, unmuteEvent, unmuteAllEvents } = await import('./lib/watch.js');
+  const isEventMuted = async (chatId, key) => {
+    const k = eventMuteKey(key);
+    const rows = await db.select().from(mutedEvents).where(and(
+      eq(mutedEvents.chatId, chatId),
+      sql`${mutedEvents.dedupeKey} IN (${sql.join([key, k].map((x) => sql`${x}`), sql`, `)})`,
+    )).all();
+    return rows.length > 0;
+  };
+  const muteEvent = (args) => muteEventTitle(args);
   const { ticketKeyboard, renderMutedEvents } = await import('./lib/menus.js');
   const muteChat = 900004;
   await deleteAllUserData(muteChat);
@@ -478,6 +490,49 @@ async function main() {
   await muteEvent({ chatId: muteChat, dedupeKey: keyA, title: 'X' });
   const delMuted = await deleteAllUserData(muteChat);
   assert.equal(delMuted.mutedEvents, 1, 'account deletion removes muted events');
+
+  // Уборка мёртвых заглушек: событие прошло / давно не в продаже — глушить
+  // больше нечего, строка только копится. Живые заглушки НЕ трогаются.
+  {
+    const { sweepMutedEvents } = await import('./lib/watch.js');
+    const sweepChat = 900007;
+    const nowSec = Math.floor(Date.now() / 1000);
+    const day = (ts) => Math.floor(ts / 86400);
+    await db.insert(users).values({ chatId: sweepChat }).run();
+    // Событие давно прошло и ушло из продажи.
+    await db.insert(events).values({
+      source: 'afisha', uid: 'sweep-past@minsk', title: 'Прошедший спектакль',
+      url: 'https://24afisha.by/ru/minsk/event/sweep-past',
+      startsAt: nowSec - 3 * 86400, onSale: false, status: 'ended', lastCheckedAt: nowSec,
+    }).run();
+    // Событие в продаже на будущую дату — глушку снимать НЕЛЬЗЯ.
+    await db.insert(events).values({
+      source: 'afisha', uid: 'sweep-live@minsk', title: 'Живой спектакль',
+      url: 'https://24afisha.by/ru/minsk/event/sweep-live',
+      startsAt: nowSec + 10 * 86400, onSale: true, status: 'onsale', lastCheckedAt: nowSec,
+    }).run();
+    // Далёкое событие, которое просто не в продаже пока (билеты ещё не открыли):
+    // проверялось только что → заглушка остаётся.
+    await db.insert(events).values({
+      source: 'afisha', uid: 'sweep-future@minsk', title: 'Будущий спектакль',
+      url: 'https://24afisha.by/ru/minsk/event/sweep-future',
+      startsAt: nowSec + 20 * 86400, onSale: false, status: 'presale', lastCheckedAt: nowSec,
+    }).run();
+    const mk = (name, d) => `ev:${name}:${d}`;
+    await muteEvent({ chatId: sweepChat, dedupeKey: mk('прошедший спектакль', day(nowSec - 3 * 86400)), title: 'Прошедший спектакль' });
+    await muteEvent({ chatId: sweepChat, dedupeKey: mk('живой спектакль', day(nowSec + 10 * 86400)), title: 'Живой спектакль' });
+    await muteEvent({ chatId: sweepChat, dedupeKey: mk('будущий спектакль', day(nowSec + 20 * 86400)), title: 'Будущий спектакль' });
+    // Легаси-строка по дням на прошедшую дату (не проходит через muteEvent, который ставит `*`).
+    await db.insert(mutedEvents).values({
+      chatId: sweepChat, dedupeKey: mk('старое имя', day(nowSec - 40 * 86400)), title: 'Старое имя',
+    }).run();
+    assert.equal((await listMutedEvents(sweepChat)).length, 4, 'four mutes before sweep');
+    await sweepMutedEvents();
+    const left = await db.select().from(mutedEvents).where(eq(mutedEvents.chatId, sweepChat)).all();
+    const leftNames = left.map((r) => r.title).sort();
+    assert.deepEqual(leftNames, ['Будущий спектакль', 'Живой спектакль'], 'sweep keeps only live mutes');
+    await deleteAllUserData(sweepChat);
+  }
 
   // Обращение владельцу: строка в `feedback` + ответ на неё.
   // Без записи ответить было не на что — это и был запрос пользователя
