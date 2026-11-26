@@ -6,6 +6,7 @@ import {
   WELCOME, HELP, helpKeyboard,
   mainMenuKeyboard, mainReplyKeyboard, proposeAddKeyboard, proposeAddText,
   renderWatchlist, unsubConfirmText, unsubConfirmKeyboard, NO_LINK_PREVIEW,
+  watchlistKeyboard,
   disableConfirmText, disableConfirmKeyboard, DISABLE_BUTTON,
 } from '../lib/menus.js';
 import { listWatchItems, miniAppUrl, miniAppConfigured, getWatchItem } from '../lib/watch.js';
@@ -121,9 +122,10 @@ export default async function (message) {
       text: renderWatchlist(items),
       parse_mode: 'HTML',
       // Кнопок удаления больше нет (отписка — ссылкой 🔕 у позиции), поэтому
-      // для непустого списка клавиатуру не шлём, а превью ссылок отключаем.
+      // для непустого списка шлём только «Заглушённые события» + «Помощь»,
+      // а превью ссылок отключаем.
       link_preview_options: NO_LINK_PREVIEW,
-      reply_markup: items.length ? undefined : mainMenuKeyboard(miniAppUrl(items), miniAppConfigured()),
+      reply_markup: items.length ? watchlistKeyboard() : mainMenuKeyboard(miniAppUrl(items), miniAppConfigured()),
     });
     return;
   }

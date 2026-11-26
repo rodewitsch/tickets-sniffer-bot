@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { HELP, helpKeyboard, renderWatchlist, mainMenuKeyboard, mainReplyKeyboard, NO_LINK_PREVIEW, disableConfirmText, disableConfirmKeyboard, disabledText, renderMutedEvents, mutedEventsKeyboard, notificationKey, dayFromDateText, CALLBACK_DATA_TRUNCATED } from '../lib/menus.js';
+import { HELP, helpKeyboard, renderWatchlist, mainMenuKeyboard, mainReplyKeyboard, NO_LINK_PREVIEW, disableConfirmText, disableConfirmKeyboard, disabledText, renderMutedEvents, mutedEventsKeyboard, watchlistKeyboard, notificationKey, dayFromDateText, CALLBACK_DATA_TRUNCATED } from '../lib/menus.js';
 import { listWatchItems, removeWatchItem, deactivateWatchItem, getWatchItem, miniAppUrl, miniAppConfigured, SOURCE_LABEL, deleteAllUserData, muteEventTitle, listMutedEvents, unmuteEvent, unmuteAllEvents } from '../lib/watch.js';
 import { addWatchItem } from '../lib/watch.js';
 import { sendFreshReplyKeyboard } from '../lib/reply.js';
@@ -229,7 +229,11 @@ export default async function (cb) {
     const text = renderWatchlist(items);
     // Кнопок удаления в списке больше нет: отписка — ссылкой 🔕 у каждой позиции,
     // а превью ссылок (страницы событий) отключено, чтобы не разворачивалась карточка.
-    const kb = items.length ? undefined : mainMenuKeyboard(miniAppUrl(items), miniAppConfigured());
+    // «Заглушённые события» оставляем при любом исходе: это обратный путь, ради
+    // которого человек и открывает список.
+    const kb = items.length
+      ? watchlistKeyboard()
+      : mainMenuKeyboard(miniAppUrl(items), miniAppConfigured());
     if (isEditable) {
       await api.editMessageText({ chat_id: chatId, message_id: msgId, text, parse_mode: 'HTML', reply_markup: kb, link_preview_options: NO_LINK_PREVIEW });
     } else {
