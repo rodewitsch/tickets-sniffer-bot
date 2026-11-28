@@ -1,0 +1,67 @@
+# Пробный проект DigitalOcean Functions: ТОЛЬКО проверка egress-IP.
+#
+# Задача — ответить на вопрос, который решает судьбу выноса парсинга в лямбды:
+# будет ли у Functions ДРУГОЙ исходящий IP, чем у Droplet 209.38.249.69?
+# С этого IP сайты bycard.by / 24afisha.by блокируются на TCP-уровне
+# (проверено 2026-11-28: abws.bycard.by отвечает за 34 мс, а bycard.by,
+# 24afisha.by и api.24afisha.by — таймаут на TCP:443).
+#
+# Деплой:
+#   doctl auth init                      # токен вводится в терминале, не в чате
+#   doctl serverless install             # ставит среду (один раз)
+#   doctl serverless connect             # подключает namespace
+#   doctl serverless deploy .            # деплой ЭТОЙ папки
+#   doctl serverless functions invoke egress/probe
+#
+# Ничего не пишет в БД, секретов не содержит, ~20 запросов наружу.
+#
+# ВАЖНО про рантайм (выяснено опытом, см. комментарий в probe.js):
+#   • runtime НЕ `nodejs:22`: в нём точка входа грузилась как ESM (`/tmp/index.mjs`)
+#     и `require`/`exports.main` падали. `nodejs:default` — штатный путь
+#     (так у официального sample-functions-nodejs-helloworld).
+#   • package.json рядом с функцией НЕ класть: «runtime type could not be
+#     determined».
+packages:
+  - name: netprobe
+    functions:
+      - name: index
+        runtime: 'nodejs:24'
+        web: true
+        limits:
+          timeout: 60000
+  # Контрольная функция из официального образца: проверяет, жив ли вообще
+  # node-рантайм в этом namespace (см. комментарий в index.js).
+  - name: hello
+    functions:
+      - name: index
+        runtime: 'nodejs:24'
+        web: true
+  # Прокси для сайтов, блокирующих IP Droplet (bycard.by / 24afisha.by).
+  # Бот зовёт её при заданном FETCH_PROXY_URL (см. lib/http.js).
+  - name: netproxy
+    functions:
+      - name: index
+        runtime: 'nodejs:24'
+        web: true
+        limits:
+          timeout: 30000
+  # Парсеры источников. Логика — из корневого lib/sources/*; модули копируются
+  # сюда на сборке (lib/build.cmd), копий кода в git нет.
+  # Бот зовёт их при заданном PARSER_URL_<SOURCE> (см. lib/sources/remote.js).
+  - name: parser
+    functions:
+      - name: afisha
+        runtime: 'nodejs:24'
+        web: true
+        limits:
+          timeout: 30000
+      - name: ticketpro
+        runtime: 'nodejs:24'
+        web: true
+        limits:
+          timeout: 30000
+      - name: bezkassira
+        runtime: 'nodejs:24'
+        web: true
+        limits:
+          timeout: 30000

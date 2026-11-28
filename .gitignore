@@ -9,3 +9,14 @@ data/
 data/prod-snap.db
 data/prod-snap.db-wal
 data/prod-snap.db-shm
+
+# DigitalOcean Functions: CLI и состояние деплоя (локальные, не в репо)
+doctl.exe
+.deployed/
+__deployer__.zip
+
+# Собранные пакеты функций: в репо лежат только исходники
+# (index.js, project.yml, build.cmd/sh). Скрипт сборки копирует lib/*.js
+# из корня проекта рядом с функцией — копии не должны попадать в git.
+experiments/do-functions-egress/packages/*/*/lib/
+experiments/do-functions-egress/packages/*/*/env.js

@@ -1,0 +1,470 @@
+// Источник BezKassira.by (облачная система продажи билетов).
+// Поиск — Sphinx через AJAX-эндпоинт /block/ (возвращает JSON {status, html}
+// с блоками <div class="li">); детали события — со страницы события (имя, дата,
+// площадка/город, диапазон цен, организатор — из JSON-LD; наличие — из HTML).
+// «Площадки» здесь — организаторы: следим за всеми событиями страницы /organises/….
+//
+// Важно: наличие билетов НЕЛЬЗЯ брать из JSON-LD. У BezKassira в разметке события
+// всегда стоит offers.availability = InStock — это значение по умолчанию для всего
+// индекса, а не признак реальной продажи. Не проданное событие отдаёт тот же
+// InStock, но на странице нет реального блока покупки (вместо «Купить билет на …»
+// показывается «Расписание мероприятия»), а страница /buy/ рендерит заглушку
+// «билеты … пока еще не доступны» (картинка sad_bezkassiric). Поэтому статус
+// определяем по HTML канонической страницы события (как у ticketpro).
+import { httpJson, httpGet } from '../http.js';
+import { extractJsonLd, findEventLd } from '../jsonld.js';
+import { normalizeLdEvent } from '../normalize.js';
+import { normText, textMatchesQuery, stripTags, tokenizeHtml, textFromTokens } from '../util.js';
+import { CITY_LABELS } from '../cities.js';
+import { mapLimit } from './common.js';
+import { BEZKASSIRA_TIMEOUT_MS, BEZKASSIRA_TRIP_SEC, BEZKASSIRA_COOLDOWN_SEC } from '../config.js';
+
+const SITE = 'https://bezkassira.by';
+
+// ── Предохранитель «хост не отвечает» ────────────────────────────────────────
+//
+// С Droplet bezkassira.by периодически не отвечает вовсе (замер: висит до
+// таймаута, пока bycard/ticketpro/telegram отвечают за 100–400 мс). Каждая
+// позиция с source='all' ходила в этот мёртвый хост и теряла ВЕСЬ таймаут:
+// 16 ключевиков × 9 с ≈ 2.5 минуты за цикл. Именно это и выглядело как
+// «медиана цикла выросла вдвое».
+//
+// Решение как в обычном circuit breaker: считаем подряд неудачные ПОПЫТКИ
+// (таймаут/сеть) и после BEZKASSIRA_TRIP_SEC выключаем источник на
+// BEZKASSIRA_COOLDOWN_SEC. Пока пауза идёт, поиск сразу возвращает пусто —
+// без сетевого запроса. Любой успешный ответ сбрасывает счётчик.
+// Состояние живёт в памяти процесса: рестарт контейнера снимает паузу, и это
+// правильно — второй процесс (бот) может видеть сеть иначе.
+let failures = 0;
+let pausedUntil = 0;
+
+function bezkassiraAvailable() {
+  return Date.now() >= pausedUntil;
+}
+
+// Источник сейчас на паузе после серии сбоев? Чекер спрашивает это, чтобы
+// НЕ кэшировать пустую выдачу: пустой список из-за паузы — это «источник
+// выключен», а не «билетов нет». Иначе кэш хранил бы ложное «пусто» ещё
+// SEARCH_CACHE_TTL_MS после возвращения сайта.
+export function isBezkassiraPaused() {
+  return !bezkassiraAvailable();
+}
+
+function noteBezkassiraFailure(err) {
+  failures += 1;
+  if (failures >= BEZKASSIRA_TRIP_SEC && Date.now() >= pausedUntil) {
+    pausedUntil = Date.now() + BEZKASSIRA_COOLDOWN_SEC * 1000;
+    console.warn(
+      `[bezkassira] ${failures} сбоев подряд — источник выключен на ` +
+      `${Math.round(BEZKASSIRA_COOLDOWN_SEC / 60)} мин (последняя: ${err && err.message || err})`,
+    );
+  }
+}
+
+function noteBezkassiraSuccess() {
+  if (failures || pausedUntil) failures = 0;
+  pausedUntil = 0;
+}
+
+// Заглушка «билеты недоступны» на странице /buy/ (рендерится вместо карты мест).
+const NO_TICKETS_RE = /sad_bezkassiric|Билетов нет|пока еще не доступны/i;
+// Заголовок блока покупки на канонической странице события в продаже.
+// Без \b: в JS \w = [A-Za-z0-9_], поэтому \b после кириллицы («на») не срабатывает.
+const BUY_HEADING_RE = /Купить билет на(?=\s)/i;
+// Блок «Расписание» вместо покупки — событие в афише, но билеты ещё не продаются.
+const SCHEDULE_ONLY_RE = /Расписание мероприятия/i;
+
+/**
+ * Реальное наличие билетов по HTML канонической страницы события.
+ * JSON-LD availability у BezKassira всегда InStock, поэтому он не используется.
+ * @returns {'onsale'|'nosale'|null} null — маркеры не распознаны (не трогаем JSON-LD).
+ */
+function availabilityFromBezkassiraPage(html) {
+  const text = String(html || '');
+  if (!text) return null;
+  // Заглушка «нет билетов» может встретиться и на канонической странице (если
+  // сайт отрендерил блок покупки) — это однозначный «не в продаже».
+  if (NO_TICKETS_RE.test(text)) return 'nosale';
+  // Реальный блок покупки: «Купить билет на …» на странице события.
+  if (BUY_HEADING_RE.test(text)) return 'onsale';
+  // Покупки нет, показано только расписание — событие афиши без продажи.
+  if (SCHEDULE_ONLY_RE.test(text)) return 'nosale';
+  return null;
+}
+
+// Канонический url события: без query/fragment и без хвостового слэша —
+// используется как uid (стабильный ключ дедупликации в events).
+// Хвостовой сегмент /buy/ — страница покупки того же события (в неё ведёт кнопка
+// «Купить билет»); для uid/ссылок берём каноническую страницу события.
+function canonUrl(u) {
+  return String(u || '')
+    .split(/[?#]/)[0]
+    .replace(/\/buy\/+$/i, '')
+    .replace(/\/+$/, '');
+}
+
+// Страницы сайта требуют хвостовой слэш (без него — HTTP 403). Нормализуем вход.
+function pageUrl(u) {
+  const s = String(u || '').split(/[?#]/)[0];
+  return /\/$/.test(s) ? s : s + '/';
+}
+
+// Каноническая страница события: /<slug>-<id>/ без хвостового /buy/.
+// Страница покупки отдаёт другую разметку (заглушку при отсутствии продажи и
+// карту мест при продаже), поэтому детали/наличие читаем с канонической страницы.
+function eventPageUrl(u) {
+  return pageUrl(canonUrl(u));
+}
+
+const ENTITIES = {
+  '&quot;': '"', '&#039;': "'", '&nbsp;': ' ', '&laquo;': '«',
+  '&raquo;': '»', '&ndash;': '–', '&mdash;': '—', '&amp;': '&',
+};
+
+function decodeEntities(s) {
+  return String(s || '')
+    .replace(/&(?:quot|#039|nbsp|laquo|raquo|ndash|mdash|amp);/g, (m) => ENTITIES[m] ?? m)
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+const CITY_SET = new Set(Object.values(CITY_LABELS).map(normText));
+
+// «ГУ «Дворец культуры…», Борисов» → venue + city (по последней запятой,
+// если хвост — известный город из каталога).
+function splitHint(hint) {
+  const s = String(hint || '').trim();
+  if (!s) return { venue: null, city: null };
+  const i = s.lastIndexOf(',');
+  if (i > 0) {
+    const head = s.slice(0, i).trim();
+    const tail = s.slice(i + 1).trim();
+    if (CITY_SET.has(normText(tail))) return { venue: head || null, city: tail };
+    return { venue: s, city: null };
+  }
+  return CITY_SET.has(normText(s)) ? { venue: null, city: s } : { venue: s, city: null };
+}
+
+// Категория (кино/театр/концерт/…) и детали (дата/цены) в выдаче поиска BezKassira
+// не выводятся, а URL события плоский (без раздела). Раздел есть только в хлебных
+// крошках страницы события: «Афиша › <Категория> [в городе] › … › событие», где
+// ссылка категории ведёт на /events/<slug>[-<город>]/…; дата и цены — в JSON-LD
+// страницы. Чтобы карточки Mini App показывали их, как у Ticketpro, живой поиск
+// обогащает результаты: открывает страницу события и за один заход берёт и раздел,
+// и JSON-LD-детали. Кэш по URL на несколько часов, чтобы повторные нажатия не
+// дёргали сайт.
+let bezkassiraDetail = new Map(); // url -> { category, dateText, startsAt, priceFrom, priceTo, currency, at }
+const BEZKASSIRA_DETAIL_TTL_MS = 6 * 60 * 60 * 1000;
+const BEZKASSIRA_DETAIL_MAX = 500;
+const BEZKASSIRA_ENRICH_LIMIT = 10;
+const BEZKASSIRA_ENRICH_CONCURRENCY = 3;
+
+// Общественные разделы BezKassira (slug-префикс URL → тип). Слаги используют «_»
+// (не «-»), город добавляется суффиксом «-<город>», напр. /events/concert-minsk/.
+const BEZKASSIRA_CATS = [
+  ['concert', 'Концерт'],
+  ['istoriya_i_lichnosti', 'Лекция'],
+  ['kino', 'Кино'],
+  ['teatry', 'Театр'],
+  ['iskusstvo_i_kultura', 'Искусство'],
+  ['exhibition', 'Выставка'],
+  ['festival', 'Фестиваль'],
+  ['sport_event', 'Спорт'],
+  ['dlya_detey', 'Детям'],
+  ['quests_and_quizzes', 'Квесты'],
+  ['party', 'Вечеринка'],
+  ['online', 'Онлайн'],
+  ['ekskursii_i_puteshestviya', 'Экскурсия'],
+  ['education_and_development', 'Обучение'],
+  ['krasota_i_zdorovie', 'Красота и здоровье'],
+  ['psihologiya_i_samopoznanie', 'Психология'],
+  ['biznes', 'Бизнес'],
+  ['it_i_internet', 'ИТ'],
+  ['new_year', 'Новый год'],
+  ['sertificati', 'Сертификат'],
+  ['drugie_razvlecheniya', 'Развлечение'],
+  ['drugie_sobytiya', 'Разное'],
+];
+
+function bezkassiraCatLabelFromSlug(seg) {
+  const s = String(seg || '');
+  for (const [slug, label] of BEZKASSIRA_CATS) {
+    // Сегмент — это '<slug>' или '<slug>-<город>'. Слаги содержат '_', поэтому
+    // сравнение с префиксом '<slug>-' не ловит чужие разделы.
+    if (s === slug || s.startsWith(`${slug}-`)) return label;
+  }
+  return null;
+}
+
+// Читает раздел события из хлебных крошек страницы: берём первую ссылку-раздел
+// (после «Афиша»), ведущую на /events/<slug>[<город>]/, и переводим в тип.
+function categoryFromBezkassiraPage(text) {
+  const m = /<div class="breadcrumbs">([\s\S]*?)<\/div>/.exec(text || '');
+  if (!m) return null;
+  for (const a of m[1].matchAll(/<a\b[^>]*href="([^"]*\/events\/([^/"]+)\/)"[^>]*>/g)) {
+    const seg = a[2];
+    const label = bezkassiraCatLabelFromSlug(seg);
+    if (label) return label;
+  }
+  return null;
+}
+
+// Цены в JSON-LD «35.00» — приводим к виду «35,00» (как у остальных источников).
+function fmtBezPrice(p) {
+  return p == null ? null : String(p).replace('.', ',');
+}
+
+// Поля события со страницы за один HTTP-заход: раздел (breadcrumbs) + JSON-LD
+// детали (дата, цены). Возвращает кэшированный объект (не null), чтобы повторные
+// нажатия в поиске не дёргали сайт.
+async function fetchBezkassiraDetail(eventUrl) {
+  const url = canonUrl(eventUrl);
+  const empty = { category: null, dateText: null, startsAt: null, priceFrom: null, priceTo: null, currency: null, onSale: null, status: null };
+  if (!url) return empty;
+  const hit = bezkassiraDetail.get(url);
+  if (hit && Date.now() - hit.at < BEZKASSIRA_DETAIL_TTL_MS) return hit;
+  let base = { ...empty };
+  try {
+    const { status, text, finalUrl } = await httpGet(eventPageUrl(url));
+    if (status === 200 && text) {
+      const category = categoryFromBezkassiraPage(text);
+      let dateText = null, startsAt = null, priceFrom = null, priceTo = null, currency = 'BYN';
+      const ld = findEventLd(extractJsonLd(text));
+      if (ld) {
+        const ev = normalizeLdEvent(ld, 'bezkassira', finalUrl || pageUrl(url));
+        if (ev) {
+          dateText = ev.dateText || null;
+          startsAt = ev.startsAt || null;
+          priceFrom = fmtBezPrice(ev.priceFrom);
+          priceTo = fmtBezPrice(ev.priceTo);
+          currency = ev.currency || 'BYN';
+        }
+      }
+      // Наличие — по HTML (JSON-LD у BezKassira всегда InStock, см. выше).
+      const avail = availabilityFromBezkassiraPage(text);
+      const onSale = avail === null ? null : avail === 'onsale';
+      base = { category, dateText, startsAt, priceFrom, priceTo, currency, onSale, status: avail };
+    }
+  } catch { /* сеть — оставляем пустые поля */ }
+  if (bezkassiraDetail.size >= BEZKASSIRA_DETAIL_MAX) {
+    const oldest = bezkassiraDetail.keys().next().value;
+    bezkassiraDetail.delete(oldest);
+  }
+  bezkassiraDetail.set(url, { ...base, at: Date.now() });
+  return bezkassiraDetail.get(url);
+}
+
+// Обогащает результаты поиска типом события и деталями (дата/цены) — открывает
+// страницу каждого события за один заход (с кэшем по URL). Порядок сохраняется;
+// поля, которые не удалось достать, остаются null.
+export async function enrichBezkassiraDetails(cards) {
+  const shown = (Array.isArray(cards) ? cards : []).slice(0, BEZKASSIRA_ENRICH_LIMIT);
+  const results = await mapLimit(
+    shown.map((e) => e && e.url).filter(Boolean),
+    BEZKASSIRA_ENRICH_CONCURRENCY,
+    (u) => fetchBezkassiraDetail(u),
+  );
+  let j = 0;
+  return shown.map((e) => {
+    const g = e && e.url ? results[j] : null;
+    if (e && e.url) j++;
+    return {
+      ...e,
+      category: (g && g.category) || null,
+      dateText: (g && g.dateText) || null,
+      startsAt: (g && g.startsAt) || null,
+      priceFrom: (g && g.priceFrom) || null,
+      priceTo: (g && g.priceTo) || null,
+      currency: (g && g.currency) || null,
+      // Наличие по HTML (true/false), null — не удалось определить.
+      onSale: g && g.onSale != null ? g.onSale : null,
+      status: (g && g.status) || null,
+    };
+  });
+}
+
+// Разбор HTML-выдачи поиска: блоки <div class="li">.
+//
+// Разбираем ОБЩИМ сканером (tokenizeHtml), а не пачкой регулярок: на
+// «найти тег регуляркой» CodeQL справедливо ругается
+// (js/incomplete-multi-character-sanitization — `<!--` внутри блока), и
+// доказывать полноту фильтра по регуляркам бессмысленно. Сканер даёт теги
+// готовыми токенами: имя, атрибуты картой и текст отдельно.
+function parseSearchHtml(html) {
+  const out = [];
+  if (!html) return out;
+  const seen = new Set();
+  const tokens = tokenizeHtml(html);
+
+  // Режем токены на блоки: каждый <div class="li"> открывает новый блок, а
+  // всё до первого — шапка выдачи.
+  const blocks = [];
+  let current = null;
+  for (const t of tokens) {
+    if (t.type === 'open' && t.name === 'div' && /\bli\b/.test(t.attrs.class || '')) {
+      current = [];
+      blocks.push(current);
+      continue;
+    }
+    if (current) current.push(t);
+  }
+
+  for (const block of blocks) {
+    // Подпись — первый <a>, у которого есть href.
+    let url = null;
+    let title = null;
+    let img = null;
+    let inHint = false;
+    let hintText = '';
+    let divDepth = 0;
+    for (const t of block) {
+      if (t.type === 'open' && t.name === 'img' && !img && t.attrs.src) img = t.attrs.src;
+      if (t.type === 'open' && t.name === 'div') {
+        if (inHint) divDepth++;
+        else if (/\bhint\b/.test(t.attrs.class || '')) inHint = true;
+      }
+      if (t.type === 'close' && t.name === 'div' && inHint) {
+        if (divDepth > 0) divDepth--;
+        else inHint = false;
+      }
+      if (inHint && t.type === 'text') hintText += t.text;
+      if (!url && t.type === 'open' && t.name === 'a' && t.attrs.href) {
+        url = pageUrl(t.attrs.href);
+        // Название — только ТЕКСТ ссылки, без разметки внутри неё.
+        title = decodeEntities(textFromTokens(collectInside(block, block.indexOf(t))))
+          .replace(/^"(.*)"$/, '$1');
+        if (!title) url = null;
+      }
+    }
+    if (!url || !title) continue;
+    if (seen.has(url)) continue;
+    seen.add(url);
+    const { venue, city } = splitHint(decodeEntities(hintText));
+    out.push({ source: 'bezkassira', uid: canonUrl(url), title, url, image: img, venue, city });
+  }
+  return out;
+}
+
+// Токены внутри элемента, который открывается на позиции openIdx: до парного
+// </name> с учётом вложенности. Нужен, чтобы взять текст ссылки целиком.
+function collectInside(tokens, openIdx) {
+  const name = tokens[openIdx].name;
+  const result = [];
+  let depth = 0;
+  for (let i = openIdx + 1; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (t.type === 'open' && t.name === name) depth++;
+    if (t.type === 'close' && t.name === name) {
+      if (depth === 0) break;
+      depth--;
+    }
+    result.push(t);
+  }
+  return result;
+}
+
+// Поиск по ключевому слову (как живой дропдаун на сайте).
+export async function searchBezkassira(query) {
+  const q = String(query || '').trim();
+  if (!q) return [];
+  // Источник на паузе после серии сбоев — не тратим таймаут на мёртвый хост.
+  if (!bezkassiraAvailable()) return [];
+  const url = `${SITE}/block/?process=activity.sphinx_search&action=search_main&query=${encodeURIComponent(q)}`;
+  // Сайт может не отвечать вовсе. Без этого catch исключение улетало наружу и
+  // РОНЯЛО ВСЮ ПОЗИЦИЮ — в проде это давало десяток item.failed за цикл, и в
+  // отчёте выглядело как «чекер сломался». Остальные источники (ticketpro,
+  // afisha) при сбое возвращают пусто — здесь должно быть так же.
+  let res;
+  try {
+    res = await httpJson(url, {
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      timeout: BEZKASSIRA_TIMEOUT_MS,
+    });
+  } catch (e) {
+    noteBezkassiraFailure(e);
+    console.warn('[bezkassira] поиск недоступен:', e && e.message || e);
+    return [];
+  }
+  noteBezkassiraSuccess();
+  const { ok, data } = res;
+  if (!ok || !data || data.status !== 0 || !data.html) return [];
+  const found = parseSearchHtml(data.html);
+  // При нуле совпадений Sphinx отдаёт случайные события — отсекаем их
+  // клиентски по пересечению токенов запроса с полями события.
+  return found.filter((e) => textMatchesQuery(q, e.title, e.venue, e.city));
+}
+
+// Детали события по его странице (JSON-LD schema.org Event + HTML для наличия).
+export async function fetchBezkassiraEventDetails(eventUrl) {
+  let page;
+  try {
+    page = await httpGet(eventPageUrl(eventUrl));
+  } catch {
+    return null;
+  }
+  const { status, text, finalUrl } = page;
+  if (status !== 200 || !text) return null;
+  const ld = findEventLd(extractJsonLd(text));
+  if (!ld) return null;
+  const ev = normalizeLdEvent(ld, 'bezkassira', finalUrl || eventPageUrl(eventUrl));
+  if (!ev) return null;
+  ev.url = pageUrl(canonUrl(ev.url));
+  ev.uid = canonUrl(ev.url);
+  // Наличие билетов — из HTML канонической страницы, а не из JSON-LD: у BezKassira
+  // availability = InStock даже для событий, которые ещё не в продаже (вместо блока
+  // покупки там «Расписание мероприятия», а /buy/ отдаёт заглушку «билеты … не
+  // доступны»). Если маркеры не распознаны — оставляем значение из JSON-LD.
+  const avail = availabilityFromBezkassiraPage(text);
+  if (avail !== null) {
+    ev.onSale = avail === 'onsale';
+    ev.status = ev.onSale ? 'onsale' : 'nosale';
+  }
+  // Ссылка на покупку ведёт в /buy/ (как на сайте), но показываем её только когда
+  // билеты реально в продаже — иначе кнопка откроет заглушку «билетов нет».
+  ev.buyUrl = ev.onSale ? `${ev.uid}/buy/` : ev.url;
+  // Цены в JSON-LD «35.00» — приводим к виду «35,00» (как у остальных источников).
+  const fmtPrice = (p) => (p == null ? null : String(p).replace('.', ','));
+  ev.priceFrom = fmtPrice(ev.priceFrom);
+  ev.priceTo = fmtPrice(ev.priceTo);
+  return ev;
+}
+
+// Организатор события (для отслеживания «площадки»): имя + url /organises/….
+export async function fetchBezkassiraOrganizer(eventUrl) {
+  let page;
+  try {
+    page = await httpGet(pageUrl(eventUrl));
+  } catch {
+    return null;
+  }
+  const { status, text } = page;
+  if (status !== 200 || !text) return null;
+  const ld = findEventLd(extractJsonLd(text));
+  if (!ld || !ld.organizer || !ld.organizer.url) return null;
+  return {
+    name: ld.organizer.name || null,
+    url: pageUrl(ld.organizer.url),
+  };
+}
+
+// События организатора (страница /organises/…): ссылки на события с первой страницы.
+export async function fetchBezkassiraOrganizerEventLinks(orgUrl) {
+  let page;
+  try {
+    page = await httpGet(pageUrl(orgUrl));
+  } catch {
+    return [];
+  }
+  const { status, text } = page;
+  if (status !== 200 || !text) return [];
+  const links = [];
+  const seen = new Set();
+  const re = /href="(https:\/\/bezkassira\.by\/[a-z0-9\-]+-\d+\/)"/g;
+  for (const m of text.matchAll(re)) {
+    const u = canonUrl(m[1]);
+    if (seen.has(u)) continue;
+    seen.add(u);
+    links.push({ url: pageUrl(m[1]), uid: u, source: 'bezkassira' });
+  }
+  return links;
+}
